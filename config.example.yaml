@@ -1,0 +1,9 @@
+# feedgen設定ファイル例
+
+# フィード生成の基本設定
+max_items: 20                    # 最大記事数
+cache_duration: 3600             # キャッシュ有効時間（秒）
+user_agent: "feedgen/1.0"        # User-Agentヘッダー
+
+# Web API設定（URL生成機能用）
+api_base_url: https://my-feedgen.example.com  # Web APIのベースURL

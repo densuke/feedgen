@@ -5,7 +5,7 @@ from pathlib import Path
 
 import click
 
-from ..core import FeedGenerator
+from ..core import FeedGenerator, URLGenerator
 from ..core.exceptions import FeedGenerationError, ParseError
 from .config import ConfigManager
 
@@ -18,10 +18,12 @@ from .config import ConfigManager
 @click.option("--user-agent", help="User-Agentヘッダー")
 @click.option("--use-feed", is_flag=True, help="既存フィードがある場合は代理取得")
 @click.option("--feed-first", is_flag=True, help="フィード検出を優先（見つからない場合のみHTML解析）")
+@click.option("--generate-url", is_flag=True, help="Web API用のURLを生成して出力")
+@click.option("--api-host", help="Web APIのホスト名（--generate-urlと併用）")
 def cli(url: str, config: str | None, output: str | None,
         max_items: int | None, user_agent: str | None,
-        use_feed: bool, feed_first: bool) -> None:
-    """指定されたURLからRSSフィードを生成.
+        use_feed: bool, feed_first: bool, generate_url: bool, api_host: str | None) -> None:
+    """指定されたURLからRSSフィードを生成またはWeb API URLを生成.
     
     Args:
         url: 分析対象のURL
@@ -31,6 +33,8 @@ def cli(url: str, config: str | None, output: str | None,
         user_agent: User-Agentヘッダー
         use_feed: 既存フィードがある場合は代理取得
         feed_first: フィード検出を優先
+        generate_url: Web API用のURLを生成
+        api_host: Web APIのホスト名
 
     """
     try:
@@ -53,7 +57,60 @@ def cli(url: str, config: str | None, output: str | None,
         if user_agent is not None:
             feed_config["user_agent"] = user_agent
 
-        # フィード生成
+        # URL生成モード
+        if generate_url:
+            # APIホストを決定（優先順位: コマンドライン > 設定ファイル）
+            api_base_url = api_host or feed_config.get("api_base_url")
+            
+            if not api_base_url:
+                click.echo(
+                    "エラー: APIホストが指定されていません。\n"
+                    "--api-host オプションを使用するか、設定ファイルで api_base_url を設定してください。",
+                    err=True
+                )
+                sys.exit(1)
+            
+            try:
+                # ベースURLを正規化
+                normalized_url = URLGenerator.normalize_base_url(api_base_url)
+                url_generator = URLGenerator(normalized_url)
+                
+                # URLが有効かチェック
+                if not url_generator.validate_base_url(normalized_url):
+                    click.echo(f"エラー: 無効なAPIホストです: {api_base_url}", err=True)
+                    sys.exit(1)
+                
+                # API URLを生成
+                api_url = url_generator.generate_feed_url(
+                    target_url=url,
+                    max_items=max_items,
+                    use_feed=use_feed if use_feed else None,
+                    feed_first=feed_first if feed_first else None,
+                    user_agent=user_agent,
+                )
+                
+                # 出力
+                if output:
+                    # ファイル出力
+                    output_path = Path(output)
+                    try:
+                        with open(output_path, "w", encoding="utf-8") as f:
+                            f.write(api_url)
+                        click.echo(f"API URLを出力しました: {output_path}")
+                    except OSError as e:
+                        click.echo(f"ファイル出力エラー: {e}", err=True)
+                        sys.exit(1)
+                else:
+                    # 標準出力
+                    click.echo(api_url)
+                    
+                return
+                
+            except Exception as e:
+                click.echo(f"URL生成エラー: {e}", err=True)
+                sys.exit(1)
+
+        # フィード生成（従来の動作）
         generator = FeedGenerator()
 
         # フィード検出を行う

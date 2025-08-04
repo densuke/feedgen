@@ -25,4 +25,6 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
-EOF < /dev/null
+
+config.yaml
+config.yml

@@ -20,6 +20,7 @@ class ConfigManager:
             "max_items": 20,
             "cache_duration": 3600,
             "user_agent": "feedgen/1.0",
+            "api_base_url": None,  # Web API のベースURL（例: https://example.com）
         }
 
     def load_config(self, config_path: str) -> dict[str, Any]:

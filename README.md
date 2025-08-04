@@ -38,6 +38,12 @@ feedgen --output feed.xml https://example.com
 
 # 最大記事数指定
 feedgen --max-items 10 https://example.com
+
+# Web API URL生成
+feedgen --generate-url --api-host https://my-feedgen.com https://example.com
+
+# 全オプション指定でのURL生成
+feedgen --generate-url --api-host my-api.com --use-feed --max-items 5 https://blog.example.com
 ```
 
 ### Webサービス
@@ -80,4 +86,28 @@ uv run pytest
 
 # コード品質チェック
 uv run ruff check
+```
+
+## 設定ファイル
+
+設定ファイル例（config.example.yaml）:
+```yaml
+# フィード生成の基本設定
+max_items: 20
+cache_duration: 3600
+user_agent: "feedgen/1.0"
+
+# Web API設定（URL生成機能用） 
+api_base_url: https://my-feedgen.example.com
+```
+
+### URL生成機能
+
+設定ファイルでapi_base_urlを設定すると、--api-hostオプションなしでURL生成ができます：
+
+```bash
+# 設定ファイル使用
+feedgen --config config.yaml --generate-url https://example.com
+
+# 出力例: https://my-feedgen.example.com/feed?url=https%3A%2F%2Fexample.com
 ```
