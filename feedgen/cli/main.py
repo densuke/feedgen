@@ -6,8 +6,8 @@ from pathlib import Path
 import click
 
 from ..core import FeedGenerator, URLGenerator
+from ..core.config import ConfigManager
 from ..core.exceptions import FeedGenerationError, ParseError
-from .config import ConfigManager
 
 
 @click.command()
@@ -39,17 +39,13 @@ def cli(url: str, config: str | None, output: str | None,
     """
     try:
         # 設定を読み込み
-        config_manager = ConfigManager()
-        feed_config = config_manager.get_default_config()
-
-        # 設定ファイルがある場合は読み込んでマージ
-        if config:
-            try:
-                file_config = config_manager.load_config(config)
-                feed_config = config_manager.merge_configs(feed_config, file_config)
-            except (FileNotFoundError, Exception) as e:
-                click.echo(f"設定ファイル読み込みエラー: {e}", err=True)
-                sys.exit(1)
+        config_manager = ConfigManager(config)
+        feed_config = config_manager.load_config()
+        
+        # デフォルト値を設定
+        feed_config.setdefault("max_items", 20)
+        feed_config.setdefault("cache_duration", 3600)
+        feed_config.setdefault("user_agent", "feedgen/1.0")
 
         # コマンドライン引数で設定をオーバーライド
         if max_items is not None:
@@ -111,7 +107,9 @@ def cli(url: str, config: str | None, output: str | None,
                 sys.exit(1)
 
         # フィード生成（従来の動作）
-        generator = FeedGenerator()
+        # YouTube API Keyを設定ファイルから取得
+        youtube_api_key = config_manager.get_youtube_api_key()
+        generator = FeedGenerator(youtube_api_key=youtube_api_key)
 
         # フィード検出を行う
         if use_feed or feed_first:

@@ -3,19 +3,33 @@
 from datetime import datetime
 from urllib.parse import urlparse
 
-from .exceptions import FeedGenerationError
+from .exceptions import FeedGenerationError, YouTubeAPIError
 from .feed_detector import FeedDetector
 from .models import RSSFeed
 from .parser import HTMLParser
+from .youtube_client import YouTubeAPIClient
 
 
 class FeedGenerator:
     """RSSフィード生成クラス."""
 
-    def __init__(self) -> None:
-        """初期化."""
+    def __init__(self, youtube_api_key: str | None = None) -> None:
+        """初期化.
+        
+        Args:
+            youtube_api_key: YouTube Data API v3のAPIキー
+        """
         self.parser = HTMLParser()
         self.feed_detector = FeedDetector()
+        self.youtube_client = None
+        
+        # YouTube APIキーが提供されている場合はクライアントを初期化
+        if youtube_api_key:
+            try:
+                self.youtube_client = YouTubeAPIClient(api_key=youtube_api_key)
+            except YouTubeAPIError:
+                # APIキーが無効な場合はNoneのまま（フォールバック）
+                self.youtube_client = None
 
     def detect_existing_feeds(self, url: str) -> list[dict]:
         """既存フィードを検出.
@@ -76,6 +90,10 @@ class FeedGenerator:
         if not parsed_url.scheme or not parsed_url.netloc:
             raise FeedGenerationError(f"無効なURLです: {url}")
 
+        # YouTube URLかどうかをチェック
+        if self.youtube_client and self.youtube_client.can_handle_url(url):
+            return self._generate_youtube_feed(url, max_items)
+
         # User-Agentを設定
         self.parser.user_agent = user_agent
 
@@ -104,3 +122,56 @@ class FeedGenerator:
             if isinstance(e, FeedGenerationError):
                 raise
             raise FeedGenerationError(f"RSSフィード生成に失敗しました: {e}")
+
+    def _generate_youtube_feed(self, url: str, max_items: int) -> RSSFeed:
+        """YouTube検索URLからRSSフィードを生成.
+        
+        Args:
+            url: YouTube検索URL
+            max_items: 最大動画数
+            
+        Returns:
+            生成されたRSSフィード
+            
+        Raises:
+            FeedGenerationError: フィード生成に失敗した場合
+        """
+        try:
+            # YouTube APIから動画データを取得
+            items = self.youtube_client.get_feed_from_url(url, max_results=max_items)
+            
+            # 検索クエリから適切なタイトルを生成
+            search_query = self.youtube_client.extract_search_query(url)
+            
+            # RSSフィードを生成
+            feed = RSSFeed(
+                title=f"YouTube検索: {search_query}",
+                description=f"YouTube検索「{search_query}」の結果",
+                link=url,
+                items=items,
+                last_build_date=datetime.now(),
+            )
+            
+            return feed
+            
+        except YouTubeAPIError as e:
+            # YouTube API失敗時はHTMLパーサーにフォールバック
+            try:
+                self.parser.user_agent = "feedgen/1.0"
+                html_content = self.parser.fetch_content(url)
+                metadata = self.parser.parse_metadata(html_content, url)
+                items = self.parser.extract_articles(html_content, url, max_items)
+                
+                return RSSFeed(
+                    title=metadata["title"],
+                    description=metadata["description"],
+                    link=metadata["link"],
+                    items=items,
+                    last_build_date=datetime.now(),
+                )
+            except Exception as fallback_error:
+                raise FeedGenerationError(
+                    f"YouTube API失敗 ({e}) およびフォールバック失敗 ({fallback_error})"
+                )
+        except Exception as e:
+            raise FeedGenerationError(f"YouTube フィード生成に失敗しました: {e}")

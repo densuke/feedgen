@@ -6,6 +6,7 @@ from feedgen.core.url_normalizers import (
     DefaultURLNormalizer,
     GoogleNewsURLNormalizer,
     URLNormalizerRegistry,
+    YouTubeURLNormalizer,
 )
 
 
@@ -103,6 +104,74 @@ class TestGoogleNewsURLNormalizer:
         assert result == "https://news.google.com/some/path"
 
 
+class TestYouTubeURLNormalizer:
+    """YouTubeURLNormalizerのテスト."""
+
+    def setup_method(self):
+        """テストメソッド実行前の準備."""
+        self.normalizer = YouTubeURLNormalizer()
+
+    def test_can_handle_youtube(self):
+        """YouTubeのURLを処理できる."""
+        assert self.normalizer.can_handle("https://www.youtube.com/results?search_query=test") is True
+        assert self.normalizer.can_handle("https://www.youtube.com/watch?v=123") is True
+
+    def test_can_handle_other_sites(self):
+        """他のサイトは処理できない."""
+        assert self.normalizer.can_handle("https://example.com") is False
+        assert self.normalizer.can_handle("https://youtube.com") is False  # www.なし
+        assert self.normalizer.can_handle("https://m.youtube.com") is False  # モバイル版
+
+    def test_normalize_absolute_url(self):
+        """絶対URLはそのまま返される."""
+        href = "https://example.com/article"
+        base_url = "https://www.youtube.com/results?search_query=test"
+        result = self.normalizer.normalize(href, base_url)
+        assert result == "https://example.com/article"
+
+    def test_normalize_watch_url(self):
+        """/watch?v=形式のURLの正規化."""
+        href = "/watch?v=dQw4w9WgXcQ"
+        base_url = "https://www.youtube.com/results?search_query=test"
+        result = self.normalizer.normalize(href, base_url)
+        assert result == "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+
+    def test_normalize_shorts_url(self):
+        """/shorts/形式のURLの正規化."""
+        href = "/shorts/abc123def"
+        base_url = "https://www.youtube.com/results?search_query=test"
+        result = self.normalizer.normalize(href, base_url)
+        assert result == "https://www.youtube.com/shorts/abc123def"
+
+    def test_normalize_channel_urls(self):
+        """チャンネルURL形式の正規化."""
+        base_url = "https://www.youtube.com/results?search_query=test"
+        
+        test_cases = [
+            ("/@channelname", "https://www.youtube.com/@channelname"),
+            ("/c/ChannelName", "https://www.youtube.com/c/ChannelName"),
+            ("/channel/UC123456789", "https://www.youtube.com/channel/UC123456789"),
+        ]
+        
+        for href, expected in test_cases:
+            result = self.normalizer.normalize(href, base_url)
+            assert result == expected
+
+    def test_normalize_root_relative_url(self):
+        """ルート相対URL(/から始まる)の正規化."""
+        href = "/playlist?list=PLrAXtmRdnEQy6nuLMfO2A8hwMHM9kFELH"
+        base_url = "https://www.youtube.com/results?search_query=test"
+        result = self.normalizer.normalize(href, base_url)
+        assert result == "https://www.youtube.com/playlist?list=PLrAXtmRdnEQy6nuLMfO2A8hwMHM9kFELH"
+
+    def test_normalize_other_relative_url(self):
+        """その他の相対URLの正規化."""
+        href = "some/path"
+        base_url = "https://www.youtube.com/results?search_query=test"
+        result = self.normalizer.normalize(href, base_url)
+        assert result == "https://www.youtube.com/some/path"
+
+
 class TestURLNormalizerRegistry:
     """URLNormalizerRegistryのテスト."""
 
@@ -116,6 +185,13 @@ class TestURLNormalizerRegistry:
         base_url = "https://news.google.com/search?q=test"
         result = self.registry.normalize(href, base_url)
         assert result == "https://news.google.com/articles/CAIiEKTLBzuGJ_xNGjfO6HexHvwqGAgEKi4IAJSuHBAtjVT"
+
+    def test_youtube_normalization(self):
+        """YouTubeのURLが正しく正規化される."""
+        href = "/watch?v=dQw4w9WgXcQ"
+        base_url = "https://www.youtube.com/results?search_query=test"
+        result = self.registry.normalize(href, base_url)
+        assert result == "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 
     def test_default_normalization(self):
         """一般的なサイトではデフォルトの正規化が使用される."""
@@ -133,6 +209,11 @@ class TestURLNormalizerRegistry:
         result = self.registry.normalize(href, base_url)
         assert result == "https://external.com/article"
         
+        # YouTube
+        base_url = "https://www.youtube.com/results?search_query=test"
+        result = self.registry.normalize(href, base_url)
+        assert result == "https://external.com/article"
+        
         # 一般サイト
         base_url = "https://example.com"
         result = self.registry.normalize(href, base_url)
@@ -147,3 +228,10 @@ class TestURLNormalizerRegistry:
         # Google News用の正規化が使用されるため、news.google.comドメインになる
         assert result.startswith("https://news.google.com/")
         assert "articles/test" in result
+        
+        # YouTubeのURLでYouTube用の正規化が使用されることを確認
+        href = "/watch?v=test123"
+        base_url = "https://www.youtube.com/results?search_query=test"
+        result = self.registry.normalize(href, base_url)
+        # YouTube用の正規化が使用されるため、www.youtube.comドメインになる
+        assert result == "https://www.youtube.com/watch?v=test123"
