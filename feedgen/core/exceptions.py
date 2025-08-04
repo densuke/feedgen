@@ -27,3 +27,8 @@ class ParseError(Exception):
         """
         super().__init__(message)
         self.message = message
+
+
+class YouTubeAPIError(FeedGenerationError):
+    """YouTube API関連のエラー."""
+    pass

@@ -98,6 +98,55 @@ URLの内容を分析してRSS Feedを生成するシステム。
 
 新しいサイト対応はURLNormalizerクラスを継承して追加するだけで実現可能。既存コードへの影響なし。
 
+### YouTube検索機能
+
+**Event**: YouTube検索URLが指定されたとき
+**Actor**: YouTubeAPIClientクラス
+**Response**: YouTube Data API v3を使用して検索結果を取得し、RSS形式で返却する
+**System**: feedgen.core.youtube_client
+
+#### 詳細動作
+
+1. YouTube検索URLからクエリパラメータを抽出
+2. YouTube Data API v3のsearch.listエンドポイントを呼び出し
+3. 検索結果（動画情報）を取得：
+   - タイトル、説明、チャンネル名
+   - 投稿日、サムネイルURL
+   - 動画URL（watch?v=形式）
+4. 取得した情報をRSSItemオブジェクトに変換
+5. RSS形式のフィードとして返却
+
+#### 対応URL形式
+
+- `https://www.youtube.com/results?search_query=[検索クエリ]`
+- `https://www.youtube.com/results?search_query=[クエリ]&sp=[フィルタ]`
+
+#### API仕様
+
+- **エンドポイント**: YouTube Data API v3 search.list
+- **必須パラメータ**: part="snippet"
+- **クォータ消費**: 100単位/リクエスト
+- **制限**: maxResults=50（最大50件）
+- **認証**: API Key必須
+
+#### 設定要件
+
+- YouTube Data API v3のAPI Keyが必要
+- 無料枠: 1日10,000クォータ（100回検索相当）
+- 設定ファイルまたは環境変数でAPI Key指定
+
+#### エラーハンドリング
+
+**Event**: API Key未設定またはクォータ超過時
+**Actor**: YouTubeAPIClientクラス
+**Response**: YouTubeAPIErrorを発生させ、HTMLパーサーにフォールバック
+**System**: feedgen.core.exceptions
+
+**Event**: API呼び出し失敗時
+**Actor**: YouTubeAPIClientクラス
+**Response**: ネットワークエラーとして処理し、HTMLパーサーにフォールバック
+**System**: feedgen.core.exceptions
+
 ### Web API URL生成機能
 
 **Event**: Web APIのフィードURLが必要なとき
@@ -278,6 +327,7 @@ feedgen-serve --reload
 - `pyyaml`: 設定ファイル処理
 - `fastapi`: Web API構築
 - `uvicorn`: ASGI Webサーバー
+- `google-api-python-client`: YouTube Data API v3アクセス
 - `pytest`: テスト実行
 - `httpx`: HTTPテスト用クライアント
 - `ruff`: コード品質チェック
@@ -294,6 +344,7 @@ feedgen/
 │   │   ├── feed_detector.py  # 既存フィード検出クラス
 │   │   ├── url_generator.py  # Web API URL生成クラス
 │   │   ├── url_normalizers.py # URL正規化システム（プラグイン型）
+│   │   ├── youtube_client.py # YouTube Data API v3クライアント
 │   │   ├── parser.py         # HTML解析機能（多戦略）
 │   │   ├── models.py         # データモデル（RSSFeed, RSSItem）
 │   │   └── exceptions.py     # 例外クラス（FeedGenerationError, ParseError）
@@ -308,6 +359,7 @@ feedgen/
 ├── tests/
 │   ├── test_core/
 │   │   ├── test_url_normalizers.py # URL正規化システムテスト
+│   │   ├── test_youtube_client.py  # YouTube APIクライアントテスト
 │   │   └── ...
 │   ├── test_cli/
 │   └── test_api/

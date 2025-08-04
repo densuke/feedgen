@@ -79,6 +79,37 @@ class GoogleNewsURLNormalizer(URLNormalizer):
         return "https://news.google.com/" + href.lstrip("/")
 
 
+class YouTubeURLNormalizer(URLNormalizer):
+    """YouTube専用のURL正規化クラス."""
+
+    def can_handle(self, base_url: str) -> bool:
+        """YouTubeのドメインかを判定."""
+        parsed = urlparse(base_url)
+        return parsed.netloc == "www.youtube.com"
+
+    def normalize(self, href: str, base_url: str) -> str:
+        """YouTube用のURL正規化."""
+        # 絶対URLはそのまま返す
+        if href.startswith("http"):
+            return href
+            
+        # YouTube特有の相対URLパターンを処理
+        if href.startswith("/watch?v=") or href.startswith("/shorts/"):
+            # YouTubeの動画URLは絶対URLに変換
+            return "https://www.youtube.com" + href
+            
+        # チャンネルURL等の処理
+        if href.startswith("/@") or href.startswith("/c/") or href.startswith("/channel/"):
+            return "https://www.youtube.com" + href
+            
+        # その他の相対URLは標準処理
+        if href.startswith("/"):
+            return "https://www.youtube.com" + href
+            
+        # 相対パスの場合はYouTubeのルートに結合
+        return "https://www.youtube.com/" + href.lstrip("/")
+
+
 class URLNormalizerRegistry:
     """URL正規化クラスのレジストリ."""
 
@@ -91,6 +122,7 @@ class URLNormalizerRegistry:
         """デフォルトのNormalizerを登録."""
         # 特定サイト用を先に登録（優先度が高い）
         self.register(GoogleNewsURLNormalizer())
+        self.register(YouTubeURLNormalizer())
         # デフォルトは最後に登録（フォールバック）
         self.register(DefaultURLNormalizer())
 

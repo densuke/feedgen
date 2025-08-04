@@ -7,3 +7,8 @@ user_agent: "feedgen/1.0"        # User-Agentヘッダー
 
 # Web API設定（URL生成機能用）
 api_base_url: https://my-feedgen.example.com  # Web APIのベースURL
+
+# YouTube Data API v3設定
+# YouTube検索機能を使用する場合は以下を設定してください
+# API Keyの取得方法: docs/youtube-api-setup.md を参照
+youtube_api_key: "YOUR_YOUTUBE_API_KEY_HERE"  # YouTube Data API v3のAPIキー
