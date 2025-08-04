@@ -7,14 +7,18 @@ requires-python = ">=3.11"
 dependencies = [
     "beautifulsoup4>=4.13.4",
     "click>=8.2.1",
+    "fastapi>=0.116.1",
     "feedgenerator>=2.2.0",
+    "httpx>=0.28.1",
     "pydantic>=2.11.7",
     "pyyaml>=6.0.2",
     "requests>=2.32.4",
+    "uvicorn[standard]>=0.35.0",
 ]
 
 [project.scripts]
 feedgen = "feedgen.cli.main:cli"
+feedgen-serve = "feedgen.cli.webapi:serve"
 
 [dependency-groups]
 dev = [

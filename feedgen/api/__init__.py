@@ -1,1 +1,5 @@
-"""Web API interface for feedgen (future implementation)."""
+"""Web API interface for feedgen."""
+
+from .main import app
+
+__all__ = ["app"]

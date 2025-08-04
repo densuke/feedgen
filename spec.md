@@ -117,25 +117,50 @@ output_format: xml
 user_agent: "feedgen/1.0"
 ```
 
-## Web API版（将来実装）
+## Web API版
 
 ### HTTP API機能
 
 **Event**: GETリクエストでURLパラメータが指定されたとき
 **Actor**: Web APIサーバー
-**Response**: コアライブラリを使用してRSSフィードを生成し、XML形式でレスポンスする
+**Response**: 既存フィード検出または新規生成でRSSフィードを返却する
 **System**: feedgen.api.main
 
 #### APIエンドポイント
 
 ```
-GET /feed?url=<target_url>&max_items=<number>
+GET /feed?url=<target_url>&max_items=<number>&use_feed=<boolean>&feed_first=<boolean>&user_agent=<string>
 ```
+
+#### パラメータ
+
+- `url` (必須): 分析対象のURL
+- `max_items` (オプション): 最大記事数（デフォルト: 20）
+- `use_feed` (オプション): 既存フィード代理取得（true/false、デフォルト: false）
+- `feed_first` (オプション): フィード検出優先（true/false、デフォルト: false）
+- `user_agent` (オプション): User-Agentヘッダー
 
 #### レスポンス形式
 
-- **成功時**: Content-Type: application/rss+xml
-- **エラー時**: Content-Type: application/json
+- **成功時**: 
+  - Content-Type: application/rss+xml
+  - RSS 2.0形式のXML
+- **エラー時**: 
+  - Content-Type: application/json
+  - `{"error": "エラーメッセージ"}`
+
+#### 使用例
+
+```bash
+# 基本的な使用方法
+curl "http://localhost:8000/feed?url=https://example.com"
+
+# 既存フィード代理取得
+curl "http://localhost:8000/feed?url=https://example.com&use_feed=true"
+
+# フィード検出優先
+curl "http://localhost:8000/feed?url=https://example.com&feed_first=true"
+```
 
 ## 技術仕様
 
@@ -147,7 +172,10 @@ GET /feed?url=<target_url>&max_items=<number>
 - `pydantic`: データバリデーション
 - `click`: CLI構築
 - `pyyaml`: 設定ファイル処理
+- `fastapi`: Web API構築
+- `uvicorn`: ASGI Webサーバー
 - `pytest`: テスト実行
+- `httpx`: HTTPテスト用クライアント
 - `ruff`: コード品質チェック
 
 ### プロジェクト構造

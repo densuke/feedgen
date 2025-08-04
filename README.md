@@ -40,6 +40,28 @@ feedgen --output feed.xml https://example.com
 feedgen --max-items 10 https://example.com
 ```
 
+### Webサービス
+
+```bash
+# サーバー起動（簡単コマンド）
+feedgen-serve
+
+# サーバー起動（オプション指定）
+feedgen-serve --host 0.0.0.0 --port 8000 --reload
+
+# または直接起動
+uv run uvicorn feedgen.api.main:app --host 0.0.0.0 --port 8000
+
+# API呼び出し例
+curl "http://localhost:8000/feed?url=https://example.com&use_feed=true"
+```
+
+#### API仕様書
+
+サーバー起動後、以下のURLでAPI仕様書を確認できます：
+- **Swagger UI**: http://localhost:8000/docs  
+- **ReDoc**: http://localhost:8000/redoc
+
 ### ライブラリとして
 
 ```python
