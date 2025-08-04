@@ -26,5 +26,6 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
+
 config.yaml
 config.yml
