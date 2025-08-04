@@ -7,9 +7,28 @@ URLの内容を分析してRSS Feedを生成するシステム。
 
 ## コアライブラリ（feedgen.core）
 
-### Feed生成機能
+### 既存フィード検出機能
 
 **Event**: URLが指定されたとき
+**Actor**: FeedDetectorクラス
+**Response**: 指定されたURLに既存のRSS/Atomフィードが存在するかを検出し、発見した場合は代理取得する
+**System**: feedgen.core.FeedDetector
+
+#### 詳細動作
+
+1. HTMLのlinkタグ（rel="alternate"）からフィードを検出
+2. 一般的なフィードパス（/feed, /rss, /atom.xml等）を確認
+3. 発見したフィードの取得・配信
+
+#### 対応フィード形式
+
+- RSS 2.0（application/rss+xml）
+- Atom（application/atom+xml）
+- JSON Feed（application/json）
+
+### Feed生成機能
+
+**Event**: URLが指定されたとき（既存フィードが見つからない場合）
 **Actor**: FeedGeneratorクラス
 **Response**: 指定されたURLの内容を分析し、RSS形式のフィードを生成する
 **System**: feedgen.core.FeedGenerator
@@ -17,9 +36,12 @@ URLの内容を分析してRSS Feedを生成するシステム。
 #### 詳細動作
 
 1. URLからWebページを取得
-2. HTMLを解析してメタデータ（タイトル、説明、記事一覧等）を抽出
-3. RSS 2.0形式のXMLを生成
-4. 生成したRSSフィードを返却
+2. 多戦略HTML解析でメタデータと記事一覧を抽出：
+   - 見出しタグ戦略（h1〜h6内のリンク）
+   - カード要素戦略（TailwindCSS等のモダンサイト対応）
+   - コンテンツブロック戦略（フォールバック用）
+3. 重複記事の排除（タイトルベース）
+4. RSS 2.0形式のXMLを生成
 
 #### 入力
 
@@ -69,6 +91,15 @@ feedgen --output feed.xml https://example.com
 
 # 最大記事数指定
 feedgen --max-items 10 https://example.com
+
+# 既存フィード代理取得
+feedgen --use-feed https://example.com
+
+# フィード検出優先（見つからない場合のみHTML解析）
+feedgen --feed-first https://example.com
+
+# User-Agent指定
+feedgen --user-agent "custom-agent/1.0" https://example.com
 ```
 
 #### 設定ファイル
@@ -128,9 +159,10 @@ feedgen/
 │   ├── core/
 │   │   ├── __init__.py
 │   │   ├── generator.py      # FeedGeneratorクラス
-│   │   ├── parser.py         # HTML解析機能
-│   │   ├── models.py         # データモデル
-│   │   └── exceptions.py     # 例外クラス
+│   │   ├── feed_detector.py  # 既存フィード検出クラス
+│   │   ├── parser.py         # HTML解析機能（多戦略）
+│   │   ├── models.py         # データモデル（RSSFeed, RSSItem）
+│   │   └── exceptions.py     # 例外クラス（FeedGenerationError, ParseError）
 │   ├── cli/
 │   │   ├── __init__.py
 │   │   ├── main.py          # CLIメイン処理

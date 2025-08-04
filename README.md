@@ -4,7 +4,9 @@ URLの内容を分析してRSSフィードを生成するツール。
 
 ## 機能
 
-- Webページの内容を分析してRSS 2.0形式のフィードを生成
+- 既存RSS/Atomフィードの自動検出・代理取得
+- Webページの多戦略HTML解析によるRSS 2.0形式フィード生成
+- TailwindCSS等のモダンサイト対応
 - コマンドライン及び設定ファイルによる設定
 - ライブラリとしても使用可能
 
@@ -21,6 +23,12 @@ pip install -e .
 ```bash
 # 基本的な使用方法
 feedgen https://example.com
+
+# 既存フィード代理取得（推奨）
+feedgen --use-feed https://example.com
+
+# フィード検出優先
+feedgen --feed-first https://example.com
 
 # 設定ファイル指定
 feedgen --config config.yaml https://example.com
