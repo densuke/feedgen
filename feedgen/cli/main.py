@@ -16,8 +16,11 @@ from .config import ConfigManager
 @click.option('--output', '-o', help='出力ファイルのパス')
 @click.option('--max-items', type=int, help='最大記事数')
 @click.option('--user-agent', help='User-Agentヘッダー')
+@click.option('--use-feed', is_flag=True, help='既存フィードがある場合は代理取得')
+@click.option('--feed-first', is_flag=True, help='フィード検出を優先（見つからない場合のみHTML解析）')
 def cli(url: str, config: Optional[str], output: Optional[str], 
-        max_items: Optional[int], user_agent: Optional[str]) -> None:
+        max_items: Optional[int], user_agent: Optional[str],
+        use_feed: bool, feed_first: bool) -> None:
     """指定されたURLからRSSフィードを生成.
     
     Args:
@@ -26,6 +29,8 @@ def cli(url: str, config: Optional[str], output: Optional[str],
         output: 出力ファイルのパス
         max_items: 最大記事数
         user_agent: User-Agentヘッダー
+        use_feed: 既存フィードがある場合は代理取得
+        feed_first: フィード検出を優先
     """
     try:
         # 設定を読み込み
@@ -49,14 +54,51 @@ def cli(url: str, config: Optional[str], output: Optional[str],
         
         # フィード生成
         generator = FeedGenerator()
-        try:
-            feed = generator.generate_feed(url, config=feed_config)
-        except (FeedGenerationError, ParseError) as e:
-            click.echo(f"フィード生成エラー: {e}", err=True)
-            sys.exit(1)
         
-        # 出力
-        xml_content = feed.to_xml()
+        # フィード検出を行う
+        if use_feed or feed_first:
+            try:
+                existing_feeds = generator.detect_existing_feeds(url)
+                
+                if existing_feeds:
+                    if use_feed:
+                        # 代理取得モード
+                        feed_info = existing_feeds[0]  # 最初に見つかったフィードを使用
+                        click.echo(f"既存フィードを発見: {feed_info['title']} ({feed_info['type']})")
+                        click.echo(f"フィードURL: {feed_info['url']}")
+                        
+                        xml_content, content_type = generator.fetch_existing_feed(feed_info['url'])
+                        click.echo("既存フィードを代理取得しました。")
+                    else:
+                        # 通知モード（feed_first=True）
+                        feed_info = existing_feeds[0]
+                        click.echo(f"既存フィードが見つかりました: {feed_info['title']} ({feed_info['type']})", err=True)
+                        click.echo(f"フィードURL: {feed_info['url']}", err=True)
+                        click.echo("--use-feedオプションで代理取得できます。", err=True)
+                        click.echo("HTML解析を継続します...", err=True)
+                        
+                        # HTML解析を実行
+                        feed = generator.generate_feed(url, config=feed_config)
+                        xml_content = feed.to_xml()
+                else:
+                    # フィードが見つからない場合はHTML解析
+                    if feed_first:
+                        click.echo("既存フィードが見つかりませんでした。HTML解析を実行します。", err=True)
+                    
+                    feed = generator.generate_feed(url, config=feed_config)
+                    xml_content = feed.to_xml()
+                    
+            except (FeedGenerationError, ParseError) as e:
+                click.echo(f"フィード処理エラー: {e}", err=True)
+                sys.exit(1)
+        else:
+            # 通常のHTML解析モード
+            try:
+                feed = generator.generate_feed(url, config=feed_config)
+                xml_content = feed.to_xml()
+            except (FeedGenerationError, ParseError) as e:
+                click.echo(f"フィード生成エラー: {e}", err=True)
+                sys.exit(1)
         
         if output:
             # ファイル出力

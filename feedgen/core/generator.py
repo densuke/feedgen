@@ -1,10 +1,11 @@
 """RSSフィード生成クラス."""
 
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple, List
 from datetime import datetime
 from urllib.parse import urlparse
 from .models import RSSFeed
 from .parser import HTMLParser
+from .feed_detector import FeedDetector
 from .exceptions import FeedGenerationError
 
 
@@ -14,6 +15,35 @@ class FeedGenerator:
     def __init__(self) -> None:
         """初期化."""
         self.parser = HTMLParser()
+        self.feed_detector = FeedDetector()
+    
+    def detect_existing_feeds(self, url: str) -> List[Dict]:
+        """既存フィードを検出.
+        
+        Args:
+            url: 検出対象のURL
+            
+        Returns:
+            フィード情報のリスト
+            
+        Raises:
+            FeedGenerationError: フィード検出に失敗した場合
+        """
+        return self.feed_detector.detect_feeds(url)
+    
+    def fetch_existing_feed(self, feed_url: str) -> Tuple[str, str]:
+        """既存フィードを取得.
+        
+        Args:
+            feed_url: フィードのURL
+            
+        Returns:
+            (フィード内容, Content-Type)のタプル
+            
+        Raises:
+            FeedGenerationError: フィード取得に失敗した場合
+        """
+        return self.feed_detector.fetch_feed(feed_url)
     
     def generate_feed(self, url: str, config: Optional[Dict] = None) -> RSSFeed:
         """指定されたURLからRSSフィードを生成.
