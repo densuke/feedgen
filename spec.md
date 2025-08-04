@@ -40,8 +40,9 @@ URLの内容を分析してRSS Feedを生成するシステム。
    - 見出しタグ戦略（h1〜h6内のリンク）
    - カード要素戦略（TailwindCSS等のモダンサイト対応）
    - コンテンツブロック戦略（フォールバック用）
-3. 重複記事の排除（タイトルベース）
-4. RSS 2.0形式のXMLを生成
+3. プラグイン型URL正規化システムでリンクURLを正規化
+4. 重複記事の排除（タイトルベース）
+5. RSS 2.0形式のXMLを生成
 
 #### 入力
 
@@ -68,7 +69,36 @@ URLの内容を分析してRSS Feedを生成するシステム。
 **Response**: ParseErrorを発生させる
 **System**: feedgen.core.exceptions
 
-### URL生成機能
+### URL正規化機能
+
+**Event**: HTML解析中に相対URLや特殊なURL形式が検出されたとき
+**Actor**: URLNormalizerRegistry、各種URLNormalizerクラス
+**Response**: サイト固有のルールに従ってURLを正規化し、絶対URLに変換する
+**System**: feedgen.core.url_normalizers
+
+#### 詳細動作
+
+1. HTMLパーサーがリンクを検出
+2. URLNormalizerRegistryが適切なNormalizerを選択
+3. サイト固有の正規化ルールを適用：
+   - Google News: `./articles/`、`./read/` 形式を `https://news.google.com/` に変換
+   - 一般サイト: 標準的な相対URL→絶対URL変換
+4. 正規化されたURLを返却
+
+#### 対応サイト
+
+- **Google News** (`news.google.com`)
+  - `./articles/[ID]` → `https://news.google.com/articles/[ID]`
+  - `./read/[ID]` → `https://news.google.com/read/[ID]`
+  - `/topics/[ID]` → `https://news.google.com/topics/[ID]`
+- **一般サイト** (フォールバック)
+  - 標準的な相対URL→絶対URL変換
+
+#### 拡張性
+
+新しいサイト対応はURLNormalizerクラスを継承して追加するだけで実現可能。既存コードへの影響なし。
+
+### Web API URL生成機能
 
 **Event**: Web APIのフィードURLが必要なとき
 **Actor**: URLGeneratorクラス
@@ -263,6 +293,7 @@ feedgen/
 │   │   ├── generator.py      # FeedGeneratorクラス
 │   │   ├── feed_detector.py  # 既存フィード検出クラス
 │   │   ├── url_generator.py  # Web API URL生成クラス
+│   │   ├── url_normalizers.py # URL正規化システム（プラグイン型）
 │   │   ├── parser.py         # HTML解析機能（多戦略）
 │   │   ├── models.py         # データモデル（RSSFeed, RSSItem）
 │   │   └── exceptions.py     # 例外クラス（FeedGenerationError, ParseError）
@@ -276,6 +307,8 @@ feedgen/
 │       └── main.py          # FastAPI Web API実装
 ├── tests/
 │   ├── test_core/
+│   │   ├── test_url_normalizers.py # URL正規化システムテスト
+│   │   └── ...
 │   ├── test_cli/
 │   └── test_api/
 ├── docs/

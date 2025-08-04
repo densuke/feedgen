@@ -7,6 +7,7 @@ from bs4 import BeautifulSoup
 
 from .exceptions import FeedGenerationError, ParseError
 from .models import RSSItem
+from .url_normalizers import URLNormalizerRegistry
 
 
 class HTMLParser:
@@ -20,6 +21,7 @@ class HTMLParser:
 
         """
         self.user_agent = user_agent
+        self.url_normalizer_registry = URLNormalizerRegistry()
 
     def fetch_content(self, url: str) -> str:
         """URLからHTMLコンテンツを取得.
@@ -268,11 +270,7 @@ class HTMLParser:
 
     def _normalize_url(self, href: str, base_url: str) -> str:
         """URLを正規化（相対URL→絶対URL変換）."""
-        if href.startswith("http"):
-            return href
-        if href.startswith("/"):
-            return base_url.rstrip("/") + href
-        return base_url.rstrip("/") + "/" + href.lstrip("/")
+        return self.url_normalizer_registry.normalize(href, base_url)
 
     def _get_description_for_element(self, element) -> str:
         """要素の説明を取得."""
