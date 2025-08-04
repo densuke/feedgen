@@ -96,38 +96,211 @@ class HTMLParser:
             soup = BeautifulSoup(html_content, 'html.parser')
             items = []
             
-            # 一般的な記事構造を探す（h1, h2, h3タグから）
-            # より高度な実装では、サイト毎の構造を分析する必要がある
-            article_tags = soup.find_all(['h1', 'h2', 'h3'], limit=max_items)
+            # 複数の抽出戦略を試す
+            items.extend(self._extract_from_headings_with_links(soup, base_url, max_items))
             
-            for i, tag in enumerate(article_tags):
-                # リンクを探す
-                link_tag = tag.find('a')
-                if link_tag and link_tag.get('href'):
-                    href = link_tag['href']
-                    # 相対URLを絶対URLに変換
-                    if href.startswith('/'):
-                        href = base_url.rstrip('/') + href
-                    elif not href.startswith('http'):
-                        href = base_url.rstrip('/') + '/' + href.lstrip('/')
-                    
-                    title = tag.get_text().strip()
-                    
-                    # 説明を取得（次の段落から）
-                    description = ""
-                    next_elem = tag.find_next(['p', 'div'])
-                    if next_elem:
-                        description = next_elem.get_text().strip()[:200] + "..."
+            if len(items) < max_items:
+                remaining = max_items - len(items)
+                items.extend(self._extract_from_card_elements(soup, base_url, remaining))
+            
+            if len(items) < max_items:
+                remaining = max_items - len(items)
+                items.extend(self._extract_from_content_blocks(soup, base_url, remaining))
+            
+            # 重複排除（タイトルベース）
+            items = self._deduplicate_items(items)
+            
+            return items[:max_items]
+        except Exception as e:
+            raise ParseError(f"記事抽出に失敗しました: {e}")
+    
+    def _extract_from_headings_with_links(self, soup: BeautifulSoup, base_url: str, max_items: int) -> List[RSSItem]:
+        """見出しタグ内のリンクから記事を抽出."""
+        items = []
+        article_tags = soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6'], limit=max_items * 2)
+        
+        for i, tag in enumerate(article_tags):
+            if len(items) >= max_items:
+                break
+                
+            link_tag = tag.find('a')
+            if link_tag and link_tag.get('href'):
+                href = self._normalize_url(link_tag['href'], base_url)
+                title = tag.get_text().strip()
+                
+                if title and href:
+                    description = self._get_description_for_element(tag)
                     
                     item = RSSItem(
                         title=title,
                         description=description,
                         link=href,
-                        guid=f"{base_url}#{i}",
+                        guid=f"{base_url}#heading-{i}",
                         pub_date=datetime.now()
                     )
                     items.append(item)
+        
+        return items
+    
+    def _extract_from_card_elements(self, soup: BeautifulSoup, base_url: str, max_items: int) -> List[RSSItem]:
+        """カード形式の要素から記事を抽出（TailwindCSS等のmodernサイト対応）."""
+        items = []
+        
+        # カード的な要素を探す（bg-content, card, cursor-pointer等のクラス）
+        card_selectors = [
+            '[class*="content"]',
+            '[class*="card"]', 
+            '[class*="cursor-pointer"]',
+            'article',
+            '[class*="item"]'
+        ]
+        
+        for selector in card_selectors:
+            if len(items) >= max_items:
+                break
+                
+            cards = soup.select(selector)[:max_items * 2]
             
-            return items
-        except Exception as e:
-            raise ParseError(f"記事抽出に失敗しました: {e}")
+            for i, card in enumerate(cards):
+                if len(items) >= max_items:
+                    break
+                
+                # カード内のテキスト取得
+                text = card.get_text().strip()
+                if len(text) < 10:  # 短すぎるものは除外
+                    continue
+                
+                # タイトルを抽出（最初の行または見出し要素）
+                title = self._extract_title_from_card(card, text)
+                
+                # 説明を抽出
+                description = text[:200] + "..." if len(text) > 200 else text
+                
+                # リンクを探す（カード全体がクリッカブルな場合やリンクが含まれる場合）
+                link = self._extract_link_from_card(card, base_url)
+                
+                if title and (link or len(title) > 5):  # リンクがなくても有用な情報があれば含める
+                    # リンクがない場合はベースURLを使用
+                    actual_link = link if link else base_url
+                    
+                    item = RSSItem(
+                        title=title,
+                        description=description,
+                        link=actual_link,
+                        guid=f"{base_url}#card-{len(items)}",
+                        pub_date=datetime.now()
+                    )
+                    items.append(item)
+        
+        return items
+    
+    def _extract_from_content_blocks(self, soup: BeautifulSoup, base_url: str, max_items: int) -> List[RSSItem]:
+        """コンテンツブロックから記事を抽出（フォールバック）."""
+        items = []
+        
+        # pタグやdivタグで長めのテキストを持つものを探す
+        content_blocks = soup.find_all(['p', 'div'], limit=max_items * 3)
+        
+        for i, block in enumerate(content_blocks):
+            if len(items) >= max_items:
+                break
+                
+            text = block.get_text().strip()
+            if len(text) < 30:  # 短すぎるものは除外
+                continue
+            
+            # 近くのリンクを探す
+            link = None
+            link_tag = block.find('a')
+            if link_tag and link_tag.get('href'):
+                link = self._normalize_url(link_tag['href'], base_url)
+            
+            if link:  # リンクがある場合のみ含める
+                title = text.split('\n')[0][:100]  # 最初の行をタイトルに
+                description = text[:200] + "..." if len(text) > 200 else text
+                
+                item = RSSItem(
+                    title=title,
+                    description=description,
+                    link=link,
+                    guid=f"{base_url}#content-{i}",
+                    pub_date=datetime.now()
+                )
+                items.append(item)
+        
+        return items
+    
+    def _extract_title_from_card(self, card, full_text: str) -> str:
+        """カード要素からタイトルを抽出."""
+        # 見出しタグがあればそれを使用
+        heading = card.find(['h1', 'h2', 'h3', 'h4', 'h5', 'h6'])
+        if heading:
+            return heading.get_text().strip()
+        
+        # 最初の行を使用（改行で分割）
+        lines = full_text.split('\n')
+        for line in lines:
+            line = line.strip()
+            if len(line) > 5 and len(line) < 200:  # 適切な長さ
+                return line
+        
+        # フォールバック: 最初の100文字
+        return full_text[:100] + "..." if len(full_text) > 100 else full_text
+    
+    def _extract_link_from_card(self, card, base_url: str) -> str:
+        """カード要素からリンクを抽出."""
+        # カード内のaタグを探す
+        link_tag = card.find('a')
+        if link_tag and link_tag.get('href'):
+            return self._normalize_url(link_tag['href'], base_url)
+        
+        # data-*属性でリンクが指定されている場合
+        for attr in ['data-href', 'data-url', 'data-link']:
+            if card.get(attr):
+                return self._normalize_url(card[attr], base_url)
+        
+        return None
+    
+    def _normalize_url(self, href: str, base_url: str) -> str:
+        """URLを正規化（相対URL→絶対URL変換）."""
+        if href.startswith('http'):
+            return href
+        elif href.startswith('/'):
+            return base_url.rstrip('/') + href
+        else:
+            return base_url.rstrip('/') + '/' + href.lstrip('/')
+    
+    def _get_description_for_element(self, element) -> str:
+        """要素の説明を取得."""
+        # 次の段落を探す
+        next_elem = element.find_next(['p', 'div'])
+        if next_elem:
+            text = next_elem.get_text().strip()
+            return text[:200] + "..." if len(text) > 200 else text
+        
+        # 親要素内の他のテキストを探す
+        parent = element.parent
+        if parent:
+            text = parent.get_text().strip()
+            # 元の要素のテキストを除外
+            element_text = element.get_text().strip()
+            if text.startswith(element_text):
+                remaining = text[len(element_text):].strip()
+                return remaining[:200] + "..." if len(remaining) > 200 else remaining
+        
+        return ""
+    
+    def _deduplicate_items(self, items: List[RSSItem]) -> List[RSSItem]:
+        """記事アイテムの重複を排除."""
+        seen_titles = set()
+        unique_items = []
+        
+        for item in items:
+            # タイトルを正規化（空白を削除、小文字に変換）
+            normalized_title = item.title.strip().lower()
+            
+            if normalized_title not in seen_titles and len(normalized_title) > 0:
+                seen_titles.add(normalized_title)
+                unique_items.append(item)
+        
+        return unique_items
