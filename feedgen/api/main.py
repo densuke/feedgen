@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
 from ..core import FeedGenerator
+from ..core.config import ConfigManager
 from ..core.exceptions import FeedGenerationError, ParseError
 
 app = FastAPI(
@@ -72,7 +73,10 @@ async def generate_feed(
             "user_agent": user_agent,
         }
         
-        generator = FeedGenerator()
+        # 設定ファイルからYouTube API Keyを読み込み
+        config_manager = ConfigManager()
+        youtube_api_key = config_manager.get_youtube_api_key()
+        generator = FeedGenerator(youtube_api_key=youtube_api_key)
         
         # フィード検出・代理取得ロジック
         if use_feed or feed_first:
