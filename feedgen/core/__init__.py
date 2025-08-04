@@ -1,7 +1,7 @@
 """Core RSS feed generation functionality."""
 
+from .feed_detector import FeedDetector
 from .generator import FeedGenerator
 from .models import RSSFeed
-from .feed_detector import FeedDetector
 
-__all__ = ["FeedGenerator", "RSSFeed", "FeedDetector"]
+__all__ = ["FeedDetector", "FeedGenerator", "RSSFeed"]
