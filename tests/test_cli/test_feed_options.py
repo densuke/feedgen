@@ -1,6 +1,5 @@
 """CLIフィードオプションのテスト."""
 
-import pytest
 from click.testing import CliRunner
 from unittest.mock import Mock, patch
 from feedgen.cli.main import cli

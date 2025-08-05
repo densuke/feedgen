@@ -17,7 +17,7 @@ def serve(host: str, port: int, reload: bool) -> None:
         reload: 開発モード
         
     """
-    click.echo(f"feedgen Web API サーバーを起動します...")
+    click.echo("feedgen Web API サーバーを起動します...")
     click.echo(f"URL: http://{host}:{port}")
     click.echo(f"API仕様書: http://{host}:{port}/docs")
     

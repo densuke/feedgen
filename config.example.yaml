@@ -12,3 +12,11 @@ api_base_url: https://my-feedgen.example.com  # Web APIのベースURL
 # YouTube検索機能を使用する場合は以下を設定してください
 # API Keyの取得方法: docs/youtube-api-setup.md を参照
 youtube_api_key: "YOUR_YOUTUBE_API_KEY_HERE"  # YouTube Data API v3のAPIキー
+
+# Google News URLデコード設定
+google_news:
+  decode_enabled: false           # デコード機能有効化（デフォルト: false）
+  request_interval: 1             # リクエスト間隔（秒、デフォルト: 1）
+  request_timeout: 10             # タイムアウト（秒、デフォルト: 10）
+  max_retries: 3                  # 最大リトライ回数（デフォルト: 3）
+  enable_logging: true            # デコードログ出力（デフォルト: true）

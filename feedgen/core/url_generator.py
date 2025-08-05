@@ -22,6 +22,9 @@ class URLGenerator:
         use_feed: bool | None = None,
         feed_first: bool | None = None,
         user_agent: str | None = None,
+        decode_google_news: bool | None = None,
+        google_news_interval: int | None = None,
+        google_news_timeout: int | None = None,
     ) -> str:
         """フィード取得用のAPI URLを生成.
         
@@ -31,6 +34,9 @@ class URLGenerator:
             use_feed: 既存フィード代理取得
             feed_first: フィード検出優先
             user_agent: User-Agentヘッダー
+            decode_google_news: Google News URLデコード有効化
+            google_news_interval: Google Newsデコード処理間隔
+            google_news_timeout: Google Newsデコード処理タイムアウト
             
         Returns:
             生成されたAPI URL
@@ -50,6 +56,15 @@ class URLGenerator:
             
         if user_agent is not None:
             params["user_agent"] = user_agent
+            
+        if decode_google_news is not None:
+            params["decode_google_news"] = "true" if decode_google_news else "false"
+            
+        if google_news_interval is not None:
+            params["google_news_interval"] = str(google_news_interval)
+            
+        if google_news_timeout is not None:
+            params["google_news_timeout"] = str(google_news_timeout)
             
         # URL生成
         query_string = urlencode(params)

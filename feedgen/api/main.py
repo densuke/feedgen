@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
 from ..core import FeedGenerator
-from ..core.config import ConfigManager
+from ..cli.config import ConfigManager
 from ..core.exceptions import FeedGenerationError, ParseError
 
 app = FastAPI(
@@ -36,7 +36,7 @@ async def root():
         "version": "1.0.0",
         "description": "URL-to-RSS feed generation with existing feed detection",
         "endpoints": {
-            "feed": "/feed?url=<target_url>&max_items=<number>&use_feed=<boolean>&feed_first=<boolean>&user_agent=<string>",
+            "feed": "/feed?url=<target_url>&max_items=<number>&use_feed=<boolean>&feed_first=<boolean>&user_agent=<string>&decode_google_news=<boolean>&google_news_interval=<number>&google_news_timeout=<number>",
             "docs": "/docs",
         },
     }
@@ -49,6 +49,9 @@ async def generate_feed(
     use_feed: Optional[bool] = Query(False, description="既存フィード代理取得"),
     feed_first: Optional[bool] = Query(False, description="フィード検出優先"),
     user_agent: Optional[str] = Query("feedgen-api/1.0", description="User-Agentヘッダー"),
+    decode_google_news: Optional[bool] = Query(False, description="Google News URLデコード有効化"),
+    google_news_interval: Optional[int] = Query(1, description="Google Newsデコード処理間隔（秒）", ge=1, le=60),
+    google_news_timeout: Optional[int] = Query(10, description="Google Newsデコード処理タイムアウト（秒）", ge=5, le=120),
 ):
     """RSSフィードを生成または代理取得する.
     
@@ -58,6 +61,9 @@ async def generate_feed(
         use_feed: 既存フィード代理取得
         feed_first: フィード検出優先
         user_agent: User-Agentヘッダー
+        decode_google_news: Google News URLデコード有効化
+        google_news_interval: Google Newsデコード処理間隔（秒）
+        google_news_timeout: Google Newsデコード処理タイムアウト（秒）
         
     Returns:
         RSS XML形式のレスポンス
@@ -68,15 +74,36 @@ async def generate_feed(
     """
     try:
         # 設定準備
+        config_manager = ConfigManager()
+        base_config = config_manager.get_default_config()
+        
+        # パラメータで設定をオーバーライド
         config = {
+            **base_config,
             "max_items": max_items,
             "user_agent": user_agent,
         }
         
-        # 設定ファイルからYouTube API Keyを読み込み
-        config_manager = ConfigManager()
-        youtube_api_key = config_manager.get_youtube_api_key()
-        generator = FeedGenerator(youtube_api_key=youtube_api_key)
+        # Google News設定
+        if decode_google_news or google_news_interval != 1 or google_news_timeout != 10:
+            google_news_config = config.get("google_news", {})
+            
+            if decode_google_news:
+                google_news_config["decode_enabled"] = True
+            if google_news_interval is not None:
+                google_news_config["request_interval"] = google_news_interval
+            if google_news_timeout is not None:
+                google_news_config["request_timeout"] = google_news_timeout
+                
+            config["google_news"] = google_news_config
+        
+        # YouTube API Keyを取得（存在する場合）
+        youtube_api_key = getattr(config_manager, 'get_youtube_api_key', lambda: None)()
+        
+        # Google News設定を取得
+        google_news_config = config_manager.get_google_news_config(config)
+        
+        generator = FeedGenerator(youtube_api_key=youtube_api_key, google_news_config=google_news_config)
         
         # フィード検出・代理取得ロジック
         if use_feed or feed_first:

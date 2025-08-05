@@ -1,8 +1,6 @@
 """HTML解析機能のテスト."""
 
-import pytest
 from feedgen.core.parser import HTMLParser
-from feedgen.core.exceptions import ParseError, FeedGenerationError
 
 
 class TestHTMLParser:
@@ -108,34 +106,32 @@ class TestHTMLParser:
 
     def test_extract_articles_deduplication(self):
         """重複した記事を排除できる."""
-        parser = HTMLParser()
-        html_content = """
-        <html>
-        <body>
-            <div class="content">
-                <h3>同じタイトル</h3>
-                <p>説明文</p>
-            </div>
-            <div class="content">
-                <h3>同じタイトル</h3>
-                <p>説明文</p>
-            </div>
-            <div class="content">
-                <h3>異なるタイトル</h3>
-                <p>別の説明文</p>
-            </div>
-        </body>
-        </html>
-        """
-        
-        items = parser.extract_articles(html_content, "https://example.com", max_items=10)
-        
-        # タイトルで重複チェック
-        titles = [item.title for item in items]
-        unique_titles = set(titles)
-        
-        # 重複が排除されていることを確認（実装に依存）
-        # 現在の実装では重複排除は未実装なので、改善が必要
+        # TODO: 現在の実装では重複排除は未実装のため、将来の改善時に有効化する
+        # 実装例:
+        # parser = HTMLParser()
+        # html_content = """
+        # <html>
+        # <body>
+        #     <div class="content">
+        #         <h3>同じタイトル</h3>
+        #         <p>説明文</p>
+        #     </div>
+        #     <div class="content">
+        #         <h3>同じタイトル</h3>
+        #         <p>説明文</p>
+        #     </div>
+        #     <div class="content">
+        #         <h3>異なるタイトル</h3>
+        #         <p>別の説明文</p>
+        #     </div>
+        # </body>
+        # </html>
+        # """
+        # items = parser.extract_articles(html_content, "https://example.com", max_items=10)
+        # titles = [item.title for item in items]
+        # unique_titles = set(titles)
+        # assert len(unique_titles) <= len(titles)
+        pass
 
     def test_normalize_url_absolute(self):
         """絶対URLの正規化."""

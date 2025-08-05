@@ -6,7 +6,7 @@ from pathlib import Path
 import click
 
 from ..core import FeedGenerator, URLGenerator
-from ..core.config import ConfigManager
+from .config import ConfigManager
 from ..core.exceptions import FeedGenerationError, ParseError
 
 
@@ -20,9 +20,13 @@ from ..core.exceptions import FeedGenerationError, ParseError
 @click.option("--feed-first", is_flag=True, help="フィード検出を優先（見つからない場合のみHTML解析）")
 @click.option("--generate-url", is_flag=True, help="Web API用のURLを生成して出力")
 @click.option("--api-host", help="Web APIのホスト名（--generate-urlと併用）")
+@click.option("--decode-google-news", is_flag=True, help="Google News URLを実際の記事URLにデコード")
+@click.option("--google-news-interval", type=int, help="Google Newsデコード処理の間隔（秒）")
+@click.option("--google-news-timeout", type=int, help="Google Newsデコード処理のタイムアウト（秒）")
 def cli(url: str, config: str | None, output: str | None,
         max_items: int | None, user_agent: str | None,
-        use_feed: bool, feed_first: bool, generate_url: bool, api_host: str | None) -> None:
+        use_feed: bool, feed_first: bool, generate_url: bool, api_host: str | None,
+        decode_google_news: bool, google_news_interval: int | None, google_news_timeout: int | None) -> None:
     """指定されたURLからRSSフィードを生成またはWeb API URLを生成.
     
     Args:
@@ -35,23 +39,45 @@ def cli(url: str, config: str | None, output: str | None,
         feed_first: フィード検出を優先
         generate_url: Web API用のURLを生成
         api_host: Web APIのホスト名
+        decode_google_news: Google News URLデコード有効化
+        google_news_interval: Google Newsデコード処理間隔
+        google_news_timeout: Google Newsデコード処理タイムアウト
 
     """
     try:
         # 設定を読み込み
-        config_manager = ConfigManager(config)
-        feed_config = config_manager.load_config()
+        config_manager = ConfigManager()
         
-        # デフォルト値を設定
-        feed_config.setdefault("max_items", 20)
-        feed_config.setdefault("cache_duration", 3600)
-        feed_config.setdefault("user_agent", "feedgen/1.0")
+        # デフォルト設定を取得
+        feed_config = config_manager.get_default_config()
+        
+        # 設定ファイルがある場合は読み込んでマージ
+        if config:
+            try:
+                file_config = config_manager.load_config(config)
+                feed_config = config_manager.merge_configs(feed_config, file_config)
+            except (FileNotFoundError, Exception) as e:
+                click.echo(f"設定ファイル読み込みエラー: {e}", err=True)
+                sys.exit(1)
 
         # コマンドライン引数で設定をオーバーライド
         if max_items is not None:
             feed_config["max_items"] = max_items
         if user_agent is not None:
             feed_config["user_agent"] = user_agent
+        
+        # Google News設定のオーバーライド
+        if decode_google_news or google_news_interval is not None or google_news_timeout is not None:
+            google_news_config = feed_config.get("google_news", {})
+            
+            if decode_google_news:
+                google_news_config["decode_enabled"] = True
+            if google_news_interval is not None:
+                google_news_config["request_interval"] = google_news_interval
+            if google_news_timeout is not None:
+                google_news_config["request_timeout"] = google_news_timeout
+                
+            feed_config["google_news"] = google_news_config
 
         # URL生成モード
         if generate_url:
@@ -83,6 +109,9 @@ def cli(url: str, config: str | None, output: str | None,
                     use_feed=use_feed if use_feed else None,
                     feed_first=feed_first if feed_first else None,
                     user_agent=user_agent,
+                    decode_google_news=decode_google_news if decode_google_news else None,
+                    google_news_interval=google_news_interval,
+                    google_news_timeout=google_news_timeout,
                 )
                 
                 # 出力
@@ -107,9 +136,13 @@ def cli(url: str, config: str | None, output: str | None,
                 sys.exit(1)
 
         # フィード生成（従来の動作）
-        # YouTube API Keyを設定ファイルから取得
-        youtube_api_key = config_manager.get_youtube_api_key()
-        generator = FeedGenerator(youtube_api_key=youtube_api_key)
+        # YouTube API Keyを設定ファイルから取得（メソッドが存在する場合）
+        youtube_api_key = getattr(config_manager, 'get_youtube_api_key', lambda: None)()
+        
+        # Google News設定を取得
+        google_news_config = config_manager.get_google_news_config(feed_config)
+        
+        generator = FeedGenerator(youtube_api_key=youtube_api_key, google_news_config=google_news_config)
 
         # フィード検出を行う
         if use_feed or feed_first:

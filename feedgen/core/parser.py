@@ -8,20 +8,28 @@ from bs4 import BeautifulSoup
 from .exceptions import FeedGenerationError, ParseError
 from .models import RSSItem
 from .url_normalizers import URLNormalizerRegistry
+from .google_news_decoder import GoogleNewsDecoderConfig
 
 
 class HTMLParser:
     """HTML解析クラス."""
 
-    def __init__(self, user_agent: str = "feedgen/1.0") -> None:
+    def __init__(self, user_agent: str = "feedgen/1.0", google_news_config: GoogleNewsDecoderConfig | None = None) -> None:
         """初期化.
         
         Args:
             user_agent: User-Agentヘッダー
+            google_news_config: Google News設定
 
         """
         self.user_agent = user_agent
-        self.url_normalizer_registry = URLNormalizerRegistry()
+        
+        # Google Newsデコーダーを設定から作成
+        google_news_decoder = None
+        if google_news_config:
+            google_news_decoder = google_news_config.create_decoder()
+            
+        self.url_normalizer_registry = URLNormalizerRegistry(google_news_decoder=google_news_decoder)
 
     def fetch_content(self, url: str) -> str:
         """URLからHTMLコンテンツを取得.

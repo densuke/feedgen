@@ -1,6 +1,5 @@
 """URL生成機能のテスト."""
 
-import pytest
 
 from feedgen.core.url_generator import URLGenerator
 

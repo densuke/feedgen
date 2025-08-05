@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from ..core.google_news_decoder import GoogleNewsDecoderConfig
 
 
 class ConfigManager:
@@ -21,6 +22,13 @@ class ConfigManager:
             "cache_duration": 3600,
             "user_agent": "feedgen/1.0",
             "api_base_url": None,  # Web API のベースURL（例: https://example.com）
+            "google_news": {
+                "decode_enabled": False,
+                "request_interval": 1,
+                "request_timeout": 10,
+                "max_retries": 3,
+                "enable_logging": True,
+            },
         }
 
     def load_config(self, config_path: str) -> dict[str, Any]:
@@ -61,5 +69,25 @@ class ConfigManager:
 
         """
         merged = base_config.copy()
-        merged.update(override_config)
+        
+        # 通常の設定項目をマージ
+        for key, value in override_config.items():
+            if key == "google_news" and isinstance(value, dict) and key in merged:
+                # google_news設定は深いマージを行う
+                merged[key] = {**merged[key], **value}
+            else:
+                merged[key] = value
+                
         return merged
+
+    def get_google_news_config(self, config: dict[str, Any]) -> GoogleNewsDecoderConfig:
+        """Google News デコーダー設定を取得.
+        
+        Args:
+            config: 全体設定
+            
+        Returns:
+            Google News デコーダー設定
+        """
+        google_news_config = config.get("google_news", {})
+        return GoogleNewsDecoderConfig.from_dict(google_news_config)

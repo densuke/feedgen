@@ -55,6 +55,14 @@ class DefaultURLNormalizer(URLNormalizer):
 class GoogleNewsURLNormalizer(URLNormalizer):
     """Google News専用のURL正規化クラス."""
 
+    def __init__(self, decoder=None):
+        """初期化.
+        
+        Args:
+            decoder: Google News URLデコーダー（オプション）
+        """
+        self.decoder = decoder
+
     def can_handle(self, base_url: str) -> bool:
         """Google Newsのドメインかを判定."""
         parsed = urlparse(base_url)
@@ -62,14 +70,21 @@ class GoogleNewsURLNormalizer(URLNormalizer):
 
     def normalize(self, href: str, base_url: str) -> str:
         """Google News用のURL正規化."""
-        # 絶対URLはそのまま返す
+        # 絶対URLの場合
         if href.startswith("http"):
+            # Google News URLのデコードを試行
+            if self.decoder and self.decoder.is_google_news_url(href):
+                return self.decoder.decode_url(href)
             return href
             
         # Google News特有の相対URLパターンを処理
         if href.startswith("./articles/") or href.startswith("./read/"):
             # Google Newsのベースドメインと結合
-            return urljoin("https://news.google.com/", href[2:])  # "./"を除去
+            normalized_url = urljoin("https://news.google.com/", href[2:])  # "./"を除去
+            # デコードを試行
+            if self.decoder and self.decoder.is_google_news_url(normalized_url):
+                return self.decoder.decode_url(normalized_url)
+            return normalized_url
             
         # その他の相対URLは標準処理
         if href.startswith("/"):
@@ -113,15 +128,20 @@ class YouTubeURLNormalizer(URLNormalizer):
 class URLNormalizerRegistry:
     """URL正規化クラスのレジストリ."""
 
-    def __init__(self):
-        """初期化."""
+    def __init__(self, google_news_decoder=None):
+        """初期化.
+        
+        Args:
+            google_news_decoder: Google News URLデコーダー（オプション）
+        """
         self._normalizers: list[URLNormalizer] = []
+        self._google_news_decoder = google_news_decoder
         self._setup_default_normalizers()
 
     def _setup_default_normalizers(self):
         """デフォルトのNormalizerを登録."""
         # 特定サイト用を先に登録（優先度が高い）
-        self.register(GoogleNewsURLNormalizer())
+        self.register(GoogleNewsURLNormalizer(decoder=self._google_news_decoder))
         self.register(YouTubeURLNormalizer())
         # デフォルトは最後に登録（フォールバック）
         self.register(DefaultURLNormalizer())
