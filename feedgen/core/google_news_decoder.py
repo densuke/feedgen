@@ -10,6 +10,8 @@ try:
 except ImportError:
     gnewsdecoder = None
 
+from .cache import URLDecodeCache, CacheConfig
+
 logger = logging.getLogger(__name__)
 
 
@@ -22,6 +24,7 @@ class GoogleNewsURLDecoder:
         request_timeout: int = 10,
         max_retries: int = 3,
         enable_logging: bool = True,
+        cache: Optional[URLDecodeCache] = None,
     ):
         """初期化.
         
@@ -30,11 +33,13 @@ class GoogleNewsURLDecoder:
             request_timeout: タイムアウト（秒）
             max_retries: 最大リトライ回数
             enable_logging: ログ出力有効化
+            cache: URLデコードキャッシュ
         """
         self.request_interval = request_interval
         self.request_timeout = request_timeout
         self.max_retries = max_retries
         self.enable_logging = enable_logging
+        self.cache = cache
         
         if gnewsdecoder is None:
             logger.error("googlenewsdecoder library is not installed")
@@ -75,6 +80,19 @@ class GoogleNewsURLDecoder:
                 logger.warning("googlenewsdecoder not available, returning original URL")
             return url
 
+        # キャッシュからの取得を試行
+        if self.cache:
+            try:
+                cached_result = self.cache.get(url)
+                if cached_result:
+                    if self.enable_logging:
+                        logger.info(f"Cache hit for URL: {url[:100]}... -> {cached_result[:100]}...")
+                    return cached_result
+            except Exception as e:
+                if self.enable_logging:
+                    logger.warning(f"Cache get failed: {e}")
+
+        # キャッシュミスまたはキャッシュ無効の場合はデコード実行
         for attempt in range(self.max_retries + 1):
             try:
                 if self.enable_logging:
@@ -92,6 +110,15 @@ class GoogleNewsURLDecoder:
                         if decoded_url and decoded_url != url:
                             if self.enable_logging:
                                 logger.info(f"Successfully decoded URL: {decoded_url}")
+                            
+                            # キャッシュに保存
+                            if self.cache:
+                                try:
+                                    self.cache.set(url, decoded_url)
+                                except Exception as e:
+                                    if self.enable_logging:
+                                        logger.warning(f"Cache set failed: {e}")
+                            
                             return decoded_url
                     else:
                         error_msg = result.get("message", "Unknown error")
@@ -101,6 +128,15 @@ class GoogleNewsURLDecoder:
                     # 直接文字列が返される場合
                     if self.enable_logging:
                         logger.info(f"Successfully decoded URL: {result}")
+                    
+                    # キャッシュに保存
+                    if self.cache:
+                        try:
+                            self.cache.set(url, result)
+                        except Exception as e:
+                            if self.enable_logging:
+                                logger.warning(f"Cache set failed: {e}")
+                    
                     return result
                     
             except Exception as e:
@@ -145,6 +181,7 @@ class GoogleNewsDecoderConfig:
         request_timeout: int = 10,
         max_retries: int = 3,
         enable_logging: bool = True,
+        cache_config: Optional[CacheConfig] = None,
     ):
         """初期化.
         
@@ -154,12 +191,14 @@ class GoogleNewsDecoderConfig:
             request_timeout: タイムアウト（秒）
             max_retries: 最大リトライ回数
             enable_logging: ログ出力有効化
+            cache_config: キャッシュ設定
         """
         self.decode_enabled = decode_enabled
         self.request_interval = request_interval
         self.request_timeout = request_timeout
         self.max_retries = max_retries
         self.enable_logging = enable_logging
+        self.cache_config = cache_config or CacheConfig()
 
     @classmethod
     def from_dict(cls, config_dict: dict) -> "GoogleNewsDecoderConfig":
@@ -171,12 +210,16 @@ class GoogleNewsDecoderConfig:
         Returns:
             設定インスタンス
         """
+        # キャッシュ設定を抽出
+        cache_config = CacheConfig.from_dict(config_dict)
+        
         return cls(
             decode_enabled=config_dict.get("decode_enabled", False),
             request_interval=config_dict.get("request_interval", 1),
             request_timeout=config_dict.get("request_timeout", 10),
             max_retries=config_dict.get("max_retries", 3),
             enable_logging=config_dict.get("enable_logging", True),
+            cache_config=cache_config,
         )
 
     def create_decoder(self) -> Optional[GoogleNewsURLDecoder]:
@@ -187,10 +230,14 @@ class GoogleNewsDecoderConfig:
         """
         if not self.decode_enabled:
             return None
-            
+        
+        # キャッシュインスタンスを作成
+        cache = self.cache_config.create_cache()
+        
         return GoogleNewsURLDecoder(
             request_interval=self.request_interval,
             request_timeout=self.request_timeout,
             max_retries=self.max_retries,
             enable_logging=self.enable_logging,
+            cache=cache,
         )
