@@ -91,12 +91,86 @@ URLの内容を分析してRSS Feedを生成するシステム。
   - `./articles/[ID]` → `https://news.google.com/articles/[ID]`
   - `./read/[ID]` → `https://news.google.com/read/[ID]`
   - `/topics/[ID]` → `https://news.google.com/topics/[ID]`
+  - **Google News URLデコード機能**: 実際のニュース記事URLへの変換
 - **一般サイト** (フォールバック)
   - 標準的な相対URL→絶対URL変換
 
 #### 拡張性
 
 新しいサイト対応はURLNormalizerクラスを継承して追加するだけで実現可能。既存コードへの影響なし。
+
+### Google News URLデコード機能
+
+**Event**: Google News URLが指定され、デコード機能が有効なとき
+**Actor**: GoogleNewsURLDecoderクラス
+**Response**: Google News URLを実際のニュース記事URLに変換する
+**System**: feedgen.core.google_news_decoder
+
+#### 詳細動作
+
+1. Google News URLの形式判定（`https://news.google.com/articles/CBMi...`）
+2. `googlenewsdecoder` ライブラリを使用してURLデコード
+3. デコード成功時は実際の記事URLを返却
+4. デコード失敗時は元のGoogle News URLを保持（フォールバック）
+5. レート制限対応（設定可能な間隔制御）
+
+#### 設定オプション
+
+- `decode_enabled: bool` - デコード機能有効化（デフォルト: false）
+- `request_interval: int` - リクエスト間隔（秒、デフォルト: 1）
+- `request_timeout: int` - タイムアウト（秒、デフォルト: 10）
+- `max_retries: int` - 最大リトライ回数（デフォルト: 3）
+- `enable_logging: bool` - デコードログ出力（デフォルト: true）
+
+#### キャッシュ機能
+
+**Event**: 同一のGoogle News URLが再度デコード要求されたとき
+**Actor**: URLDecodeCacheクラス
+**Response**: キャッシュされたデコード結果を返却し、API呼び出しを削減する
+**System**: feedgen.core.cache
+
+##### 詳細動作
+
+1. **キャッシュ確認**: Google News URLに対応するデコード済みURLがキャッシュに存在するかチェック
+2. **キャッシュヒット**: 存在する場合は即座にキャッシュされた結果を返却
+3. **キャッシュミス**: 存在しない場合は通常のデコード処理を実行
+4. **キャッシュ保存**: デコード成功時は結果をキャッシュに保存（TTL付き）
+5. **キャッシュクリーンアップ**: TTL期限切れのエントリを自動削除
+
+##### キャッシュ方式
+
+**インメモリキャッシュ（デフォルト）**
+- `cachetools.TTLCache`使用
+- プロセス内でのみ有効
+- メモリ効率的で高速
+- 再起動時にクリア
+
+**Redisキャッシュ（オプション）**
+- 外部Redisサーバー使用
+- 複数プロセス・サーバー間で共有可能
+- 永続化可能
+- ネットワーク経由でアクセス
+
+##### 設定オプション
+
+- `cache_enabled: bool` - キャッシュ機能有効化（デフォルト: true）
+- `cache_type: str` - キャッシュタイプ（'memory'/'redis'、デフォルト: 'memory'）
+- `cache_ttl: int` - キャッシュ有効期限（秒、デフォルト: 86400=24時間）
+- `cache_max_size: int` - メモリキャッシュ最大サイズ（デフォルト: 1000）
+- `redis_url: str` - Redis接続URL（デフォルト: 'redis://localhost:6379/0'）
+- `redis_key_prefix: str` - Redisキープレフィックス（デフォルト: 'feedgen:gnews:'）
+
+#### エラーハンドリング
+
+**Event**: URLデコードに失敗したとき
+**Actor**: GoogleNewsURLDecoderクラス
+**Response**: 元のGoogle News URLを保持し、ログに警告を出力
+**System**: feedgen.core.exceptions
+
+**Event**: キャッシュアクセスに失敗したとき
+**Actor**: URLDecodeCacheクラス
+**Response**: キャッシュを無効化してデコード処理を続行し、ログに警告を出力
+**System**: feedgen.core.cache
 
 ### YouTube検索機能
 
@@ -212,6 +286,15 @@ feedgen --generate-url --api-host https://my-feedgen.com https://example.com
 
 # 全オプション指定でのURL生成
 feedgen --generate-url --api-host my-api.com --use-feed --max-items 5 https://blog.example.com
+
+# Google News URLデコード機能
+feedgen --decode-google-news https://news.google.com/topics/CAAqBwgKMKHL9QowkqbaAg
+
+# デコード設定付き
+feedgen --decode-google-news --google-news-interval 2 --google-news-timeout 15 https://news.google.com/topics/CAAqBwgKMKHL9QowkqbaAg
+
+# キャッシュ設定付き
+feedgen --decode-google-news --google-news-cache-ttl 7200 --google-news-cache-size 500 https://news.google.com/topics/CAAqBwgKMKHL9QowkqbaAg
 ```
 
 ### Web API URL生成機能
@@ -248,6 +331,24 @@ cache_duration: 3600
 output_format: xml
 user_agent: "feedgen/1.0"
 api_base_url: https://my-feedgen.example.com  # Web API URL生成用
+
+# Google News URLデコード設定
+google_news:
+  decode_enabled: false           # デコード機能有効化（デフォルト: false）
+  request_interval: 1             # リクエスト間隔（秒、デフォルト: 1）
+  request_timeout: 10             # タイムアウト（秒、デフォルト: 10）
+  max_retries: 3                  # 最大リトライ回数（デフォルト: 3）
+  enable_logging: true            # デコードログ出力（デフォルト: true）
+  
+  # キャッシュ設定
+  cache_enabled: true             # キャッシュ機能有効化（デフォルト: true）
+  cache_type: memory              # キャッシュタイプ（memory/redis、デフォルト: memory）
+  cache_ttl: 86400                # キャッシュ有効期限（秒、デフォルト: 86400=24時間）
+  cache_max_size: 1000            # メモリキャッシュ最大サイズ（デフォルト: 1000）
+  
+  # Redis設定（cache_type: redisの場合）
+  redis_url: redis://localhost:6379/0  # Redis接続URL
+  redis_key_prefix: "feedgen:gnews:"    # Redisキープレフィックス
 ```
 
 ## Web API版
@@ -272,6 +373,12 @@ GET /feed?url=<target_url>&max_items=<number>&use_feed=<boolean>&feed_first=<boo
 - `use_feed` (オプション): 既存フィード代理取得（true/false、デフォルト: false）
 - `feed_first` (オプション): フィード検出優先（true/false、デフォルト: false）
 - `user_agent` (オプション): User-Agentヘッダー
+- `decode_google_news` (オプション): Google News URLデコード有効化（true/false、デフォルト: false）
+- `google_news_interval` (オプション): デコード処理間隔（秒、デフォルト: 1）
+- `google_news_timeout` (オプション): デコード処理タイムアウト（秒、デフォルト: 10）
+- `google_news_cache_enabled` (オプション): キャッシュ機能有効化（true/false、デフォルト: true）
+- `google_news_cache_ttl` (オプション): キャッシュ有効期限（秒、デフォルト: 86400）
+- `google_news_cache_type` (オプション): キャッシュタイプ（memory/redis、デフォルト: memory）
 
 #### レスポンス形式
 
@@ -293,6 +400,15 @@ curl "http://localhost:8000/feed?url=https://example.com&use_feed=true"
 
 # フィード検出優先
 curl "http://localhost:8000/feed?url=https://example.com&feed_first=true"
+
+# Google News URLデコード
+curl "http://localhost:8000/feed?url=https://news.google.com/topics/CAAqBwgKMKHL9QowkqbaAg&decode_google_news=true"
+
+# デコード設定付き
+curl "http://localhost:8000/feed?url=https://news.google.com/topics/CAAqBwgKMKHL9QowkqbaAg&decode_google_news=true&google_news_interval=2"
+
+# キャッシュ設定付き
+curl "http://localhost:8000/feed?url=https://news.google.com/topics/CAAqBwgKMKHL9QowkqbaAg&decode_google_news=true&google_news_cache_ttl=7200"
 ```
 
 ### Web APIサーバー起動
@@ -331,6 +447,8 @@ feedgen-serve --reload
 - `pytest`: テスト実行
 - `httpx`: HTTPテスト用クライアント
 - `ruff`: コード品質チェック
+- `cachetools`: インメモリキャッシュ機能
+- `redis`: Redisキャッシュ機能（オプション）
 
 ### プロジェクト構造
 
@@ -344,6 +462,8 @@ feedgen/
 │   │   ├── feed_detector.py  # 既存フィード検出クラス
 │   │   ├── url_generator.py  # Web API URL生成クラス
 │   │   ├── url_normalizers.py # URL正規化システム（プラグイン型）
+│   │   ├── google_news_decoder.py # Google News URLデコード機能
+│   │   ├── cache.py          # キャッシュ機能（インメモリ・Redis）
 │   │   ├── youtube_client.py # YouTube Data API v3クライアント
 │   │   ├── parser.py         # HTML解析機能（多戦略）
 │   │   ├── models.py         # データモデル（RSSFeed, RSSItem）
@@ -359,6 +479,8 @@ feedgen/
 ├── tests/
 │   ├── test_core/
 │   │   ├── test_url_normalizers.py # URL正規化システムテスト
+│   │   ├── test_google_news_decoder.py # Google News URLデコードテスト
+│   │   ├── test_cache.py        # キャッシュ機能テスト
 │   │   ├── test_youtube_client.py  # YouTube APIクライアントテスト
 │   │   └── ...
 │   ├── test_cli/
