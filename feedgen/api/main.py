@@ -36,7 +36,7 @@ async def root():
         "version": "1.0.0",
         "description": "URL-to-RSS feed generation with existing feed detection",
         "endpoints": {
-            "feed": "/feed?url=<target_url>&max_items=<number>&use_feed=<boolean>&feed_first=<boolean>&user_agent=<string>&decode_google_news=<boolean>&google_news_interval=<number>&google_news_timeout=<number>",
+            "feed": "/feed?url=<target_url>&max_items=<number>&use_feed=<boolean>&feed_first=<boolean>&user_agent=<string>&decode_google_news=<boolean>&google_news_interval=<number>&google_news_timeout=<number>&google_news_cache_ttl=<number>&google_news_cache_type=<string>",
             "docs": "/docs",
         },
     }
@@ -52,6 +52,8 @@ async def generate_feed(
     decode_google_news: Optional[bool] = Query(False, description="Google News URLデコード有効化"),
     google_news_interval: Optional[int] = Query(1, description="Google Newsデコード処理間隔（秒）", ge=1, le=60),
     google_news_timeout: Optional[int] = Query(10, description="Google Newsデコード処理タイムアウト（秒）", ge=5, le=120),
+    google_news_cache_ttl: Optional[int] = Query(86400, description="Google Newsキャッシュ有効期限（秒）", ge=300, le=604800),
+    google_news_cache_type: Optional[str] = Query("memory", description="Google Newsキャッシュタイプ", regex="^(memory|redis)$"),
 ):
     """RSSフィードを生成または代理取得する.
     
@@ -64,6 +66,8 @@ async def generate_feed(
         decode_google_news: Google News URLデコード有効化
         google_news_interval: Google Newsデコード処理間隔（秒）
         google_news_timeout: Google Newsデコード処理タイムアウト（秒）
+        google_news_cache_ttl: Google Newsキャッシュ有効期限（秒）
+        google_news_cache_type: Google Newsキャッシュタイプ
         
     Returns:
         RSS XML形式のレスポンス
@@ -85,7 +89,8 @@ async def generate_feed(
         }
         
         # Google News設定
-        if decode_google_news or google_news_interval != 1 or google_news_timeout != 10:
+        if (decode_google_news or google_news_interval != 1 or google_news_timeout != 10 or
+            google_news_cache_ttl != 86400 or google_news_cache_type != "memory"):
             google_news_config = config.get("google_news", {})
             
             if decode_google_news:
@@ -94,6 +99,10 @@ async def generate_feed(
                 google_news_config["request_interval"] = google_news_interval
             if google_news_timeout is not None:
                 google_news_config["request_timeout"] = google_news_timeout
+            if google_news_cache_ttl is not None:
+                google_news_config["cache_ttl"] = google_news_cache_ttl
+            if google_news_cache_type is not None:
+                google_news_config["cache_type"] = google_news_cache_type
                 
             config["google_news"] = google_news_config
         

@@ -20,3 +20,13 @@ google_news:
   request_timeout: 10             # タイムアウト（秒、デフォルト: 10）
   max_retries: 3                  # 最大リトライ回数（デフォルト: 3）
   enable_logging: true            # デコードログ出力（デフォルト: true）
+  
+  # キャッシュ設定
+  cache_enabled: true             # キャッシュ機能有効化（デフォルト: true）
+  cache_type: memory              # キャッシュタイプ（memory/redis、デフォルト: memory）
+  cache_ttl: 86400                # キャッシュ有効期限（秒、デフォルト: 86400=24時間）
+  cache_max_size: 1000            # メモリキャッシュ最大サイズ（デフォルト: 1000）
+  
+  # Redis設定（cache_type: redisの場合のみ有効）
+  redis_url: "redis://localhost:6379/0"  # Redis接続URL
+  redis_key_prefix: "feedgen:gnews:"      # Redisキープレフィックス

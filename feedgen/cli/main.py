@@ -23,10 +23,14 @@ from ..core.exceptions import FeedGenerationError, ParseError
 @click.option("--decode-google-news", is_flag=True, help="Google News URLを実際の記事URLにデコード")
 @click.option("--google-news-interval", type=int, help="Google Newsデコード処理の間隔（秒）")
 @click.option("--google-news-timeout", type=int, help="Google Newsデコード処理のタイムアウト（秒）")
+@click.option("--google-news-cache-ttl", type=int, help="Google Newsキャッシュ有効期限（秒）")
+@click.option("--google-news-cache-type", type=click.Choice(['memory', 'redis']), help="Google Newsキャッシュタイプ")
+@click.option("--google-news-cache-size", type=int, help="Google Newsメモリキャッシュサイズ")
 def cli(url: str, config: str | None, output: str | None,
         max_items: int | None, user_agent: str | None,
         use_feed: bool, feed_first: bool, generate_url: bool, api_host: str | None,
-        decode_google_news: bool, google_news_interval: int | None, google_news_timeout: int | None) -> None:
+        decode_google_news: bool, google_news_interval: int | None, google_news_timeout: int | None,
+        google_news_cache_ttl: int | None, google_news_cache_type: str | None, google_news_cache_size: int | None) -> None:
     """指定されたURLからRSSフィードを生成またはWeb API URLを生成.
     
     Args:
@@ -42,6 +46,9 @@ def cli(url: str, config: str | None, output: str | None,
         decode_google_news: Google News URLデコード有効化
         google_news_interval: Google Newsデコード処理間隔
         google_news_timeout: Google Newsデコード処理タイムアウト
+        google_news_cache_ttl: Google Newsキャッシュ有効期限
+        google_news_cache_type: Google Newsキャッシュタイプ
+        google_news_cache_size: Google Newsメモリキャッシュサイズ
 
     """
     try:
@@ -67,7 +74,8 @@ def cli(url: str, config: str | None, output: str | None,
             feed_config["user_agent"] = user_agent
         
         # Google News設定のオーバーライド
-        if decode_google_news or google_news_interval is not None or google_news_timeout is not None:
+        if (decode_google_news or google_news_interval is not None or google_news_timeout is not None or
+            google_news_cache_ttl is not None or google_news_cache_type is not None or google_news_cache_size is not None):
             google_news_config = feed_config.get("google_news", {})
             
             if decode_google_news:
@@ -76,6 +84,12 @@ def cli(url: str, config: str | None, output: str | None,
                 google_news_config["request_interval"] = google_news_interval
             if google_news_timeout is not None:
                 google_news_config["request_timeout"] = google_news_timeout
+            if google_news_cache_ttl is not None:
+                google_news_config["cache_ttl"] = google_news_cache_ttl
+            if google_news_cache_type is not None:
+                google_news_config["cache_type"] = google_news_cache_type
+            if google_news_cache_size is not None:
+                google_news_config["cache_max_size"] = google_news_cache_size
                 
             feed_config["google_news"] = google_news_config
 
