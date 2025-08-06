@@ -2,7 +2,7 @@
 
 import pytest
 from feedgen.core import FeedGenerator, RSSFeed
-from feedgen.core.exceptions import FeedGenerationError, ParseError
+from feedgen.core.exceptions import FeedGenerationError
 
 
 class TestFeedGenerator:

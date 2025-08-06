@@ -91,12 +91,12 @@ class TestFeedDetector:
         """Content-Typeがフィード形式かの判定."""
         detector = FeedDetector()
         
-        assert detector._is_feed_type("application/rss+xml") == True
-        assert detector._is_feed_type("application/atom+xml") == True
-        assert detector._is_feed_type("application/xml") == True
-        assert detector._is_feed_type("text/xml") == True
-        assert detector._is_feed_type("application/json") == True
-        assert detector._is_feed_type("text/html") == False
+        assert detector._is_feed_type("application/rss+xml")
+        assert detector._is_feed_type("application/atom+xml")
+        assert detector._is_feed_type("application/xml")
+        assert detector._is_feed_type("text/xml")
+        assert detector._is_feed_type("application/json")
+        assert not detector._is_feed_type("text/html")
 
     def test_normalize_feed_type(self):
         """Content-Typeの正規化."""
@@ -125,7 +125,7 @@ class TestFeedDetector:
         detector = FeedDetector()
         result = detector._check_feed_exists("https://example.com/feed")
         
-        assert result == True
+        assert result
 
     @patch('feedgen.core.feed_detector.requests.head')
     def test_check_feed_exists_false(self, mock_head):
@@ -137,7 +137,7 @@ class TestFeedDetector:
         detector = FeedDetector()
         result = detector._check_feed_exists("https://example.com/feed")
         
-        assert result == False
+        assert not result
 
     def test_guess_feed_type_from_path(self):
         """パスからフィード形式を推測."""

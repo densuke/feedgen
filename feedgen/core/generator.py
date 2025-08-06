@@ -8,18 +8,21 @@ from .feed_detector import FeedDetector
 from .models import RSSFeed
 from .parser import HTMLParser
 from .youtube_client import YouTubeAPIClient
+from .google_news_decoder import GoogleNewsDecoderConfig
 
 
 class FeedGenerator:
     """RSSフィード生成クラス."""
 
-    def __init__(self, youtube_api_key: str | None = None) -> None:
+    def __init__(self, youtube_api_key: str | None = None, google_news_config: GoogleNewsDecoderConfig | None = None) -> None:
         """初期化.
         
         Args:
             youtube_api_key: YouTube Data API v3のAPIキー
+            google_news_config: Google News設定
         """
-        self.parser = HTMLParser()
+        self.google_news_config = google_news_config
+        self.parser = HTMLParser(google_news_config=google_news_config)
         self.feed_detector = FeedDetector()
         self.youtube_client = None
         
@@ -94,8 +97,20 @@ class FeedGenerator:
         if self.youtube_client and self.youtube_client.can_handle_url(url):
             return self._generate_youtube_feed(url, max_items)
 
-        # User-Agentを設定
-        self.parser.user_agent = user_agent
+        # Google News設定の更新（設定が変更されている場合）
+        google_news_config_dict = config.get("google_news", {})
+        if google_news_config_dict:
+            google_news_config = GoogleNewsDecoderConfig.from_dict(google_news_config_dict)
+            # 設定が変更されている場合はパーサーを再作成
+            if google_news_config.decode_enabled != (self.google_news_config and self.google_news_config.decode_enabled):
+                self.google_news_config = google_news_config
+                self.parser = HTMLParser(user_agent=user_agent, google_news_config=google_news_config)
+            else:
+                # User-Agentのみ更新
+                self.parser.user_agent = user_agent
+        else:
+            # User-Agentを設定
+            self.parser.user_agent = user_agent
 
         try:
             # HTMLコンテンツを取得

@@ -8,6 +8,7 @@ URLの内容を分析してRSSフィードを生成するツール。
 - Webページの多戦略HTML解析によるRSS 2.0形式フィード生成
 - TailwindCSS等のモダンサイト対応
 - プラグイン型URL正規化システム（Google News等の特殊サイト対応）
+- Google News URLデコード機能（実際のニュース記事URLへの変換）
 - コマンドライン及び設定ファイルによる設定
 - ライブラリとしても使用可能
 
@@ -45,6 +46,21 @@ feedgen --generate-url --api-host https://my-feedgen.com https://example.com
 
 # 全オプション指定でのURL生成
 feedgen --generate-url --api-host my-api.com --use-feed --max-items 5 https://blog.example.com
+
+# Google News URLデコード機能
+feedgen --decode-google-news https://news.google.com/topics/CAAqBwgKMKHL9QowkqbaAg
+
+# デコード設定付き
+feedgen --decode-google-news --google-news-interval 2 --google-news-timeout 15 https://news.google.com/topics/CAAqBwgKMKHL9QowkqbaAg
+
+# 設定ファイルでのGoogle News機能有効化
+feedgen --config config.yaml https://news.google.com/topics/CAAqBwgKMKHL9QowkqbaAg
+
+# Google News URLキャッシュ機能
+feedgen --decode-google-news --google-news-cache-ttl 7200 --google-news-cache-type memory https://news.google.com/topics/CAAqBwgKMKHL9QowkqbaAg
+
+# Redisキャッシュ使用
+feedgen --decode-google-news --google-news-cache-type redis https://news.google.com/topics/CAAqBwgKMKHL9QowkqbaAg
 ```
 
 ### Webサービス
@@ -61,6 +77,18 @@ uv run uvicorn feedgen.api.main:app --host 0.0.0.0 --port 8000
 
 # API呼び出し例
 curl "http://localhost:8000/feed?url=https://example.com&use_feed=true"
+
+# Google News URLデコード
+curl "http://localhost:8000/feed?url=https://news.google.com/topics/CAAqBwgKMKHL9QowkqbaAg&decode_google_news=true"
+
+# デコード設定付き
+curl "http://localhost:8000/feed?url=https://news.google.com/topics/CAAqBwgKMKHL9QowkqbaAg&decode_google_news=true&google_news_interval=2"
+
+# 複数の設定パラメータ指定
+curl "http://localhost:8000/feed?url=https://news.google.com/topics/CAAqBwgKMKHL9QowkqbaAg&decode_google_news=true&google_news_interval=2&google_news_timeout=15&google_news_max_retries=5"
+
+# キャッシュ機能付き
+curl "http://localhost:8000/feed?url=https://news.google.com/topics/CAAqBwgKMKHL9QowkqbaAg&decode_google_news=true&google_news_cache_ttl=7200&google_news_cache_type=memory"
 ```
 
 #### API仕様書
@@ -73,10 +101,41 @@ curl "http://localhost:8000/feed?url=https://example.com&use_feed=true"
 
 ```python
 from feedgen.core import FeedGenerator
+from feedgen.core.google_news_decoder import GoogleNewsDecoderConfig
 
+# 基本的な使用方法
 generator = FeedGenerator()
 feed = generator.generate_feed("https://example.com")
 print(feed.to_xml())
+
+# Google News URLデコード機能付き
+config = GoogleNewsDecoderConfig(
+    decode_enabled=True,
+    request_interval=2,
+    request_timeout=15
+)
+generator = FeedGenerator(google_news_config=config)
+feed = generator.generate_feed("https://news.google.com/topics/CAAqBwgKMKHL9QowkqbaAg")
+print(feed.to_xml())
+
+# Google News URLデコーダーを直接使用
+from feedgen.core.google_news_decoder import GoogleNewsURLDecoder
+from feedgen.core.cache import MemoryURLDecodeCache
+
+decoder = GoogleNewsURLDecoder(request_interval=1)
+google_news_url = "https://news.google.com/articles/CBMiSWh0dHBzOi8vd3d3LnRva3lvLW5wLmNvLmpwL2FydGljbGUvNTUwMDYw0gEA"
+decoded_url = decoder.decode_url(google_news_url)
+print(f"デコード結果: {decoded_url}")
+
+# キャッシュ機能付きGoogle News URLデコーダー
+cache = MemoryURLDecodeCache(max_size=1000, default_ttl=3600)
+decoder_with_cache = GoogleNewsURLDecoder(request_interval=1, cache=cache)
+decoded_url = decoder_with_cache.decode_url(google_news_url)
+print(f"キャッシュ付きデコード結果: {decoded_url}")
+
+# キャッシュ統計の確認
+stats = cache.get_stats()
+print(f"キャッシュ統計: ヒット={stats['hits']}, ミス={stats['misses']}, ヒット率={stats['hit_rate']:.2%}")
 ```
 
 ## 開発
@@ -100,6 +159,22 @@ user_agent: "feedgen/1.0"
 
 # Web API設定（URL生成機能用） 
 api_base_url: https://my-feedgen.example.com
+
+# Google News URLデコード設定
+google_news:
+  decode_enabled: false           # デコード機能有効化（デフォルト: false）
+  request_interval: 1             # リクエスト間隔（秒、デフォルト: 1）
+  request_timeout: 10             # タイムアウト（秒、デフォルト: 10）
+  max_retries: 3                  # 最大リトライ回数（デフォルト: 3）
+  enable_logging: true            # デコードログ出力（デフォルト: true）
+  
+  # キャッシュ設定（コスト削減と高速化のため）
+  cache_enabled: true             # キャッシュ機能有効化（デフォルト: true）
+  cache_type: memory              # キャッシュタイプ（memory/redis、デフォルト: memory）
+  cache_ttl: 86400                # キャッシュ有効期限（秒、デフォルト: 24時間）
+  cache_max_size: 1000            # メモリキャッシュ最大サイズ（デフォルト: 1000）
+  redis_url: redis://localhost:6379/0  # Redis接続URL（Redisタイプ時のみ）
+  redis_key_prefix: "feedgen:gnews:"   # Redisキープレフィックス（デフォルト）
 ```
 
 ### URL生成機能
@@ -112,3 +187,62 @@ feedgen --config config.yaml --generate-url https://example.com
 
 # 出力例: https://my-feedgen.example.com/feed?url=https%3A%2F%2Fexample.com
 ```
+
+## Google News URLデコード機能について
+
+この機能は、Google News特有の暗号化されたURL（`https://news.google.com/articles/CBMi...`形式）を実際のニュース記事のURLに変換します。
+
+### 動作例
+
+```bash
+# Google News URL（変換前）
+https://news.google.com/articles/CBMiSWh0dHBzOi8vd3d3LnRva3lvLW5wLmNvLmpwL2FydGljbGUvNTUwMDYw0gEA
+
+# デコード後の実際のURL例
+https://www.tokyo-np.co.jp/article/550060
+```
+
+### Google News URLキャッシュ機能
+
+同じGoogle News URLが複数回デコードされる場合、キャッシュ機能によりAPI呼び出しを削減できます。
+
+#### キャッシュのメリット
+
+- **コスト削減**: 同じURLの重複デコードを回避
+- **高速化**: キャッシュヒット時の即座な応答
+- **レート制限回避**: API呼び出し頻度の削減
+
+#### キャッシュタイプ
+
+1. **メモリキャッシュ（memory）**
+   - プロセス内のメモリに保存
+   - 高速アクセス
+   - プロセス終了時にクリア
+
+2. **Redisキャッシュ（redis）**  
+   - 外部Redisサーバーに保存
+   - プロセス間で共有
+   - 永続化可能
+
+#### キャッシュ統計の確認
+
+```python
+from feedgen.core.cache import MemoryURLDecodeCache
+
+cache = MemoryURLDecodeCache()
+# ... URLデコード処理 ...
+
+stats = cache.get_stats()
+print(f"ヒット数: {stats['hits']}")
+print(f"ミス数: {stats['misses']}")  
+print(f"ヒット率: {stats['hit_rate']:.2%}")
+print(f"キャッシュサイズ: {stats['size']}")
+```
+
+### 注意事項
+
+- この機能は `googlenewsdecoder` ライブラリに依存しています
+- デコード処理には時間がかかる場合があります（設定可能なリクエスト間隔による）
+- レート制限やネットワークエラーに対するリトライ機能を内蔵しています
+- デコードに失敗した場合は元のGoogle News URLが使用されます
+- キャッシュ機能はデフォルトで有効ですが、設定で無効化可能です

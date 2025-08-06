@@ -1,6 +1,5 @@
 """CLIメイン機能のテスト."""
 
-import pytest
 from click.testing import CliRunner
 from feedgen.cli.main import cli
 

@@ -1,8 +1,7 @@
 """YouTubeAPIクライアントのテスト."""
 
 import os
-from datetime import datetime
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -107,7 +106,6 @@ class TestYouTubeAPIClient:
             # モックレスポンスの設定
             mock_youtube = Mock()
             mock_search = Mock()
-            mock_list = Mock()
             mock_request = Mock()
             
             mock_build.return_value = mock_youtube
@@ -216,7 +214,6 @@ class TestYouTubeAPIClient:
         with patch('feedgen.core.youtube_client.build') as mock_build:
             mock_youtube = Mock()
             mock_search = Mock()
-            mock_list = Mock()
             mock_request = Mock()
             
             mock_build.return_value = mock_youtube
