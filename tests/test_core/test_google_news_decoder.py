@@ -1,11 +1,12 @@
 """Google News URLデコーダーのテスト."""
 
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 from feedgen.core.google_news_decoder import (
     GoogleNewsURLDecoder,
     GoogleNewsDecoderConfig,
 )
+from feedgen.core.cache import MemoryURLDecodeCache, CacheConfig
 
 
 class TestGoogleNewsURLDecoder:
@@ -21,16 +22,19 @@ class TestGoogleNewsURLDecoder:
 
     def test_init_custom_values(self):
         """カスタム値での初期化をテスト."""
+        cache = MemoryURLDecodeCache()
         decoder = GoogleNewsURLDecoder(
             request_interval=2,
             request_timeout=15,
             max_retries=5,
             enable_logging=False,
+            cache=cache,
         )
         assert decoder.request_interval == 2
         assert decoder.request_timeout == 15
         assert decoder.max_retries == 5
         assert decoder.enable_logging is False
+        assert decoder.cache == cache
 
     def test_is_google_news_url_valid(self):
         """有効なGoogle News URLの判定をテスト."""
@@ -292,3 +296,138 @@ class TestGoogleNewsDecoderConfig:
         assert decoder.request_timeout == 15
         assert decoder.max_retries == 5
         assert decoder.enable_logging is False
+
+    def test_decode_url_with_cache_hit(self):
+        """キャッシュヒット時のデコードテスト."""
+        # モックキャッシュを作成
+        mock_cache = Mock()
+        mock_cache.get.return_value = "https://example.com/cached/article"
+        
+        decoder = GoogleNewsURLDecoder(cache=mock_cache)
+        
+        google_news_url = "https://news.google.com/articles/CBMi123"
+        result = decoder.decode_url(google_news_url)
+        
+        # キャッシュヒットで結果が返される
+        assert result == "https://example.com/cached/article"
+        mock_cache.get.assert_called_once_with(google_news_url)
+        mock_cache.set.assert_not_called()  # キャッシュ保存は呼ばれない
+
+    @patch('feedgen.core.google_news_decoder.gnewsdecoder')
+    def test_decode_url_with_cache_miss_and_success(self, mock_gnewsdecoder):
+        """キャッシュミス後のデコード成功とキャッシュ保存テスト."""
+        # モックキャッシュを作成
+        mock_cache = Mock()
+        mock_cache.get.return_value = None  # キャッシュミス
+        
+        # gnewsdecoderのモックを設定
+        mock_gnewsdecoder.return_value = {
+            "status": True,
+            "decoded_url": "https://example.com/article/123"
+        }
+        
+        decoder = GoogleNewsURLDecoder(cache=mock_cache)
+        
+        google_news_url = "https://news.google.com/articles/CBMi123"
+        result = decoder.decode_url(google_news_url)
+        
+        # デコード結果が返される
+        assert result == "https://example.com/article/123"
+        
+        # キャッシュの動作を確認
+        mock_cache.get.assert_called_once_with(google_news_url)
+        mock_cache.set.assert_called_once_with(google_news_url, "https://example.com/article/123")
+        
+        # gnewsdecoderが呼ばれることを確認
+        mock_gnewsdecoder.assert_called_once_with(google_news_url, interval=1)
+
+    def test_decode_url_with_cache_error(self):
+        """キャッシュエラー時のフォールバック動作テスト."""
+        # エラーを発生させるモックキャッシュ
+        mock_cache = Mock()
+        mock_cache.get.side_effect = Exception("Cache error")
+        
+        decoder = GoogleNewsURLDecoder(cache=mock_cache, enable_logging=False)
+        
+        # 非Google NewsのURLでテスト（キャッシュエラーが発生してもURLは返される）
+        normal_url = "https://example.com/article"
+        result = decoder.decode_url(normal_url)
+        
+        assert result == normal_url  # 元のURLが返される
+
+    @patch('feedgen.core.google_news_decoder.gnewsdecoder')
+    def test_decode_url_with_cache_set_error(self, mock_gnewsdecoder):
+        """キャッシュ保存エラー時の動作テスト."""
+        # キャッシュ保存でエラーを発生させるモック
+        mock_cache = Mock()
+        mock_cache.get.return_value = None
+        mock_cache.set.side_effect = Exception("Cache set error")
+        
+        # gnewsdecoderのモックを設定
+        mock_gnewsdecoder.return_value = {
+            "status": True,
+            "decoded_url": "https://example.com/article/123"
+        }
+        
+        decoder = GoogleNewsURLDecoder(cache=mock_cache, enable_logging=False)
+        
+        google_news_url = "https://news.google.com/articles/CBMi123"
+        result = decoder.decode_url(google_news_url)
+        
+        # デコード結果は正常に返される（キャッシュ保存エラーは無視される）
+        assert result == "https://example.com/article/123"
+
+    def test_config_with_cache_config(self):
+        """CacheConfig統合テスト."""
+        cache_config = CacheConfig(
+            enabled=True,
+            cache_type="memory",
+            ttl=3600,
+            max_size=500
+        )
+        
+        config = GoogleNewsDecoderConfig(
+            decode_enabled=True,
+            cache_config=cache_config
+        )
+        
+        decoder = config.create_decoder()
+        
+        assert decoder is not None
+        assert decoder.cache is not None
+        assert isinstance(decoder.cache, MemoryURLDecodeCache)
+        assert decoder.cache.max_size == 500
+        assert decoder.cache.default_ttl == 3600
+
+    def test_config_from_dict_with_cache_settings(self):
+        """辞書からのキャッシュ設定統合テスト."""
+        config_dict = {
+            "decode_enabled": True,
+            "cache_enabled": True,
+            "cache_type": "memory",
+            "cache_ttl": 7200,
+            "cache_max_size": 2000,
+        }
+        
+        config = GoogleNewsDecoderConfig.from_dict(config_dict)
+        decoder = config.create_decoder()
+        
+        assert decoder is not None
+        assert decoder.cache is not None
+        assert isinstance(decoder.cache, MemoryURLDecodeCache)
+        assert decoder.cache.max_size == 2000
+        assert decoder.cache.default_ttl == 7200
+
+    def test_config_cache_disabled(self):
+        """キャッシュ無効時のテスト."""
+        cache_config = CacheConfig(enabled=False)
+        
+        config = GoogleNewsDecoderConfig(
+            decode_enabled=True,
+            cache_config=cache_config
+        )
+        
+        decoder = config.create_decoder()
+        
+        assert decoder is not None
+        assert decoder.cache is None
