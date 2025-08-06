@@ -7,6 +7,11 @@ from abc import ABC, abstractmethod
 from typing import Optional, Union
 from urllib.parse import urlparse, unquote
 
+try:
+    import redis
+except ImportError:
+    redis = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -165,9 +170,7 @@ class RedisURLDecodeCache(URLDecodeCache):
             key_prefix: キープレフィックス
             default_ttl: デフォルトTTL（秒）
         """
-        try:
-            import redis
-        except ImportError:
+        if redis is None:
             raise ImportError("redis library is required for Redis cache")
         
         self.redis_url = redis_url

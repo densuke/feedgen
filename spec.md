@@ -99,12 +99,18 @@ URLの内容を分析してRSS Feedを生成するシステム。
 
 新しいサイト対応はURLNormalizerクラスを継承して追加するだけで実現可能。既存コードへの影響なし。
 
-### Google News URLデコード機能
+### Google News URLデコード機能（WIP: 実装完了、動作調整中）
 
 **Event**: Google News URLが指定され、デコード機能が有効なとき
 **Actor**: GoogleNewsURLDecoderクラス
 **Response**: Google News URLを実際のニュース記事URLに変換する
 **System**: feedgen.core.google_news_decoder
+
+⚠️ **現在の状況**: 
+- キャッシュ機能含む基本実装は完了済み
+- 外部ライブラリ(gnewsdecoder)との連携で一部URLのデコードが期待通り動作しない場合がある
+- デコード失敗時は元のGoogle News URLをそのまま使用（機能停止はしない）
+- キャッシュ機能は完全動作確認済み（メモリ・Redis両対応）
 
 #### 詳細動作
 
