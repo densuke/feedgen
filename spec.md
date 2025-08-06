@@ -108,9 +108,17 @@ URLの内容を分析してRSS Feedを生成するシステム。
 
 ⚠️ **現在の状況**: 
 - キャッシュ機能含む基本実装は完了済み
-- 外部ライブラリ(gnewsdecoder)との連携で一部URLのデコードが期待通り動作しない場合がある
+- **Google側のBot検出とレート制限により実際のデコードが制限される場合が多い**
+  - HTTP 429 (Too Many Requests)エラーが発生
+  - `/sorry/index`ページへのリダイレクトによる制限
+  - RSS URLへの400 Bad Requestエラー
 - デコード失敗時は元のGoogle News URLをそのまま使用（機能停止はしない）
 - キャッシュ機能は完全動作確認済み（メモリ・Redis両対応）
+
+**実用的な運用指針**:
+- **推奨間隔**: 10秒以上（Google側の制限回避のため）
+- **IP分散**: 複数サーバー・プロキシ経由での利用が有効
+- **キャッシュ活用**: 重複リクエスト回避によるコスト削減とレート制限対策
 
 #### 詳細動作
 
@@ -168,15 +176,26 @@ URLの内容を分析してRSS Feedを生成するシステム。
 
 #### エラーハンドリング
 
-**Event**: URLデコードに失敗したとき
+**Event**: URLデコードに失敗したとき（Google制限等）
 **Actor**: GoogleNewsURLDecoderクラス
 **Response**: 元のGoogle News URLを保持し、ログに警告を出力
 **System**: feedgen.core.exceptions
+
+具体的なエラーパターン:
+- **HTTP 429 (Too Many Requests)**: Google側のレート制限
+- **HTTP 400 (Bad Request)**: RSS URL拒否
+- **`/sorry/index`リダイレクト**: Bot検出による制限
+- **ネットワークタイムアウト**: 接続エラー
 
 **Event**: キャッシュアクセスに失敗したとき
 **Actor**: URLDecodeCacheクラス
 **Response**: キャッシュを無効化してデコード処理を続行し、ログに警告を出力
 **System**: feedgen.core.cache
+
+**Event**: 依存ライブラリ未インストール時
+**Actor**: GoogleNewsURLDecoderクラス
+**Response**: デコード機能を無効化し、元URLをそのまま返却
+**System**: feedgen.core.google_news_decoder
 
 ### YouTube検索機能
 
@@ -455,6 +474,7 @@ feedgen-serve --reload
 - `ruff`: コード品質チェック
 - `cachetools`: インメモリキャッシュ機能
 - `redis`: Redisキャッシュ機能（オプション）
+- `googlenewsdecoder`: Google News URLデコード機能
 
 ### プロジェクト構造
 
