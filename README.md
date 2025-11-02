@@ -9,7 +9,9 @@ URLの内容を分析してRSSフィードを生成するツール。
 - TailwindCSS等のモダンサイト対応
 - プラグイン型URL正規化システム（Google News、YouTube、Instagram等の特殊サイト対応）
 - Google News URLデコード機能（実際のニュース記事URLへの変換）
-- Instagram プロフィールページ対応（軽量実装版）
+- Instagram プロフィールページ対応
+  - 軽量版: 認証不要でプロフィール情報取得
+  - フル機能版: 認証ありで投稿詳細取得（instaloader使用）
 - コマンドライン及び設定ファイルによる設定
 - ライブラリとしても使用可能
 
@@ -69,13 +71,47 @@ feedgen https://www.instagram.com/username/
 
 ### Instagram対応について
 
-**現在の実装**: 軽量版（プロフィール情報のみ取得）
+Instagramプロフィールページから投稿情報を取得してRSSフィードを生成できます。
+
+#### 軽量版（デフォルト）
+
+認証不要でプロフィール情報のみ取得します。
 
 - **対応URL**: プロフィールページのみ（例: `https://www.instagram.com/username/`）
 - **取得情報**: プロフィール名、フォロワー数、フォロー数、投稿数、バイオ
 - **制限事項**: 個別投稿の詳細は取得できません
+- **認証**: 不要
 
-**将来的な拡張予定**: instaloaderを使用した投稿詳細の取得
+```bash
+# 軽量版の使用（デフォルト）
+feedgen https://www.instagram.com/username/
+```
+
+#### フル機能版（要認証）
+
+instaloaderライブラリを使用して投稿の詳細情報を取得します。
+
+- **取得情報**: 投稿内容、いいね数、コメント数、投稿日時など
+- **認証**: Instagram認証が必要
+- **設定**: `config.yaml`で有効化
+
+**インストール**:
+```bash
+uv add instaloader
+# または
+uv sync --extra instagram
+```
+
+**設定例** (`config.yaml`):
+```yaml
+instagram:
+  use_full_client: true
+  username: "あなたのユーザー名"
+  session_file: "~/.config/instaloader/session-あなたのユーザー名"
+  max_posts: 20
+```
+
+**認証手順の詳細**: [docs/instagram_setup.md](docs/instagram_setup.md)
 
 ```
 
@@ -153,7 +189,25 @@ print(f"キャッシュ付きデコード結果: {decoded_url}")
 stats = cache.get_stats()
 print(f"キャッシュ統計: ヒット={stats['hits']}, ミス={stats['misses']}, ヒット率={stats['hit_rate']:.2%}")
 
-# Instagram プロフィール情報の取得
+# Instagram プロフィール情報の取得（軽量版）
+feed = generator.generate_feed("https://www.instagram.com/username/")
+print(feed.to_xml())
+
+# Instagram フル機能版の使用
+from feedgen.core.instagram_client import InstagramFullClient
+
+instagram_client = InstagramFullClient(
+    username="あなたのユーザー名",
+    session_file="~/.config/instaloader/session-あなたのユーザー名",
+    max_posts=20
+)
+instagram_client.login()
+
+generator = FeedGenerator(
+    instagram_username="あなたのユーザー名",
+    instagram_session_file="~/.config/instaloader/session-あなたのユーザー名",
+    use_instagram_full_client=True
+)
 feed = generator.generate_feed("https://www.instagram.com/username/")
 print(feed.to_xml())
 ```
