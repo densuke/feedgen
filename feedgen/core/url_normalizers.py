@@ -125,6 +125,42 @@ class YouTubeURLNormalizer(URLNormalizer):
         return "https://www.youtube.com/" + href.lstrip("/")
 
 
+
+class InstagramURLNormalizer(URLNormalizer):
+    """Instagram専用のURL正規化クラス."""
+
+    def can_handle(self, base_url: str) -> bool:
+        """Instagramのドメインかを判定."""
+        parsed = urlparse(base_url)
+        return parsed.netloc in ("www.instagram.com", "instagram.com")
+
+    def normalize(self, href: str, base_url: str) -> str:
+        """Instagram用のURL正規化.
+        
+        Args:
+            href: 正規化対象のURL
+            base_url: ベースURL
+            
+        Returns:
+            正規化されたURL
+        """
+        # 絶対URLはそのまま返す
+        if href.startswith("http"):
+            return href
+            
+        # Instagram特有の相対URLパターンを処理
+        if href.startswith("/p/") or href.startswith("/reel/"):
+            # 投稿URLは絶対URLに変換
+            return "https://www.instagram.com" + href
+            
+        # プロフィールURL
+        if href.startswith("/") and not href.startswith("//"):
+            return "https://www.instagram.com" + href
+            
+        # 相対パスの場合はInstagramのルートに結合
+        return "https://www.instagram.com/" + href.lstrip("/")
+
+
 class URLNormalizerRegistry:
     """URL正規化クラスのレジストリ."""
 
@@ -143,6 +179,7 @@ class URLNormalizerRegistry:
         # 特定サイト用を先に登録（優先度が高い）
         self.register(GoogleNewsURLNormalizer(decoder=self._google_news_decoder))
         self.register(YouTubeURLNormalizer())
+        self.register(InstagramURLNormalizer())
         # デフォルトは最後に登録（フォールバック）
         self.register(DefaultURLNormalizer())
 

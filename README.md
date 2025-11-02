@@ -7,8 +7,9 @@ URLの内容を分析してRSSフィードを生成するツール。
 - 既存RSS/Atomフィードの自動検出・代理取得
 - Webページの多戦略HTML解析によるRSS 2.0形式フィード生成
 - TailwindCSS等のモダンサイト対応
-- プラグイン型URL正規化システム（Google News等の特殊サイト対応）
+- プラグイン型URL正規化システム（Google News、YouTube、Instagram等の特殊サイト対応）
 - Google News URLデコード機能（実際のニュース記事URLへの変換）
+- Instagram プロフィールページ対応（軽量実装版）
 - コマンドライン及び設定ファイルによる設定
 - ライブラリとしても使用可能
 
@@ -61,6 +62,21 @@ feedgen --decode-google-news --google-news-cache-ttl 7200 --google-news-cache-ty
 
 # Redisキャッシュ使用
 feedgen --decode-google-news --google-news-cache-type redis https://news.google.com/topics/CAAqBwgKMKHL9QowkqbaAg
+
+# Instagram プロフィールページ
+feedgen https://www.instagram.com/username/
+```
+
+### Instagram対応について
+
+**現在の実装**: 軽量版（プロフィール情報のみ取得）
+
+- **対応URL**: プロフィールページのみ（例: `https://www.instagram.com/username/`）
+- **取得情報**: プロフィール名、フォロワー数、フォロー数、投稿数、バイオ
+- **制限事項**: 個別投稿の詳細は取得できません
+
+**将来的な拡張予定**: instaloaderを使用した投稿詳細の取得
+
 ```
 
 ### Webサービス
@@ -136,6 +152,10 @@ print(f"キャッシュ付きデコード結果: {decoded_url}")
 # キャッシュ統計の確認
 stats = cache.get_stats()
 print(f"キャッシュ統計: ヒット={stats['hits']}, ミス={stats['misses']}, ヒット率={stats['hit_rate']:.2%}")
+
+# Instagram プロフィール情報の取得
+feed = generator.generate_feed("https://www.instagram.com/username/")
+print(feed.to_xml())
 ```
 
 ## 開発

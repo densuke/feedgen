@@ -25,6 +25,7 @@ class FeedGenerator:
         self.parser = HTMLParser(google_news_config=google_news_config)
         self.feed_detector = FeedDetector()
         self.youtube_client = None
+        self.instagram_client = None
         
         # YouTube APIキーが提供されている場合はクライアントを初期化
         if youtube_api_key:
@@ -33,6 +34,10 @@ class FeedGenerator:
             except YouTubeAPIError:
                 # APIキーが無効な場合はNoneのまま（フォールバック）
                 self.youtube_client = None
+        
+        # Instagramクライアントを初期化
+        from feedgen.core.instagram_client import InstagramClient
+        self.instagram_client = InstagramClient()
 
     def detect_existing_feeds(self, url: str) -> list[dict]:
         """既存フィードを検出.
@@ -96,6 +101,10 @@ class FeedGenerator:
         # YouTube URLかどうかをチェック
         if self.youtube_client and self.youtube_client.can_handle_url(url):
             return self._generate_youtube_feed(url, max_items)
+        
+        # Instagram URLかどうかをチェック
+        if self.instagram_client and self.instagram_client.is_instagram_url(url):
+            return self._generate_instagram_feed(url, max_items)
 
         # Google News設定の更新（設定が変更されている場合）
         google_news_config_dict = config.get("google_news", {})
@@ -190,3 +199,46 @@ class FeedGenerator:
                 )
         except Exception as e:
             raise FeedGenerationError(f"YouTube フィード生成に失敗しました: {e}")
+
+    def _generate_instagram_feed(self, url: str, max_items: int = 20) -> RSSFeed:
+        """Instagram URLからRSSフィードを生成.
+        
+        現在の軽量実装版ではプロフィール情報のみ取得可能。
+        将来的な拡張: instaloaderを使用した投稿詳細の取得
+        
+        Args:
+            url: Instagram URL
+            max_items: 最大アイテム数（現在未使用）
+            
+        Returns:
+            生成されたRSSフィード
+            
+        Raises:
+            FeedGenerationError: フィード生成に失敗した場合
+        """
+        if not self.instagram_client:
+            raise FeedGenerationError("Instagram クライアントが初期化されていません")
+        
+        # プロフィールURLでない場合はエラー
+        if not self.instagram_client.is_profile_url(url):
+            raise FeedGenerationError(
+                "現在はInstagramプロフィールURLのみ対応しています。"
+                "例: https://www.instagram.com/username/"
+            )
+        
+        # プロフィール情報を取得
+        feed_data = self.instagram_client.fetch_profile_metadata(url)
+        
+        if not feed_data:
+            raise FeedGenerationError(f"Instagram プロフィール情報の取得に失敗しました: {url}")
+        
+        # RSSFeedに変換
+        feed = RSSFeed(
+            title=feed_data.title,
+            description=feed_data.description,
+            link=feed_data.link,
+            items=feed_data.items,
+            last_build_date=datetime.now(),
+        )
+        
+        return feed
