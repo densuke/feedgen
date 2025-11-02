@@ -1,11 +1,7 @@
-"""Instagram専用クライアント.
-
-軽量実装版: metaタグからプロフィール情報を取得
-将来的な拡張: instaloaderを使用したフル機能実装
-"""
-
+# -*- coding: utf-8 -*-
 import logging
 import re
+from datetime import datetime
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -48,7 +44,7 @@ class InstagramClient:
 
     def is_profile_url(self, url: str) -> bool:
         """プロフィールページのURLかを判定.
-        
+
         Args:
             url: 判定対象のURL
             
@@ -75,6 +71,25 @@ class InstagramClient:
         # /@username または /username 形式のみ許可
         return bool(re.match(r"^/?@?\w+$", path))
 
+    def extract_profile_name(self, url: str) -> Optional[str]:
+        """プロフィールURLからユーザー名を抽出.
+
+        Args:
+            url: InstagramプロフィールURL
+
+        Returns:
+            プロフィール名 (抽出できない場合はNone)
+        """
+        if not self.is_profile_url(url):
+            return None
+
+        parsed = urlparse(url)
+        path = parsed.path.strip("/")
+        if not path:
+            return None
+
+        return path.lstrip("@")
+
     def fetch_profile_metadata(self, url: str) -> Optional[RSSFeed]:
         """プロフィールページからmetaタグを取得してRSSFeedを生成.
         
@@ -82,7 +97,7 @@ class InstagramClient:
             url: InstagramプロフィールURL
             
         Returns:
-            RSSFeed（取得失敗時はNone）
+            RSSFeed(取得失敗時はNone)
         """
         try:
             headers = {"User-Agent": self.user_agent}
@@ -135,7 +150,7 @@ class InstagramClient:
             property_name: og:titleなどのプロパティ名
             
         Returns:
-            content値（見つからない場合はNone）
+            content値(見つからない場合はNone)
         """
         meta_tag = soup.find("meta", property=property_name)
         if meta_tag and meta_tag.get("content"):
@@ -199,10 +214,7 @@ class InstagramClient:
             return f"{stats}\n\n{profile_info['bio']}"
         
         return stats
-
-
-
-class InstagramFullClient:
+class InstagramFullClient(InstagramClient):
     """Instagram専用クライアント(instaloader使用フル実装版).
     
     投稿詳細の取得が可能だが、認証が必要。
@@ -213,6 +225,8 @@ class InstagramFullClient:
         username: str | None = None,
         session_file: str | None = None,
         max_posts: int = 20,
+        user_agent: str = "Mozilla/5.0 (compatible; feedgen/1.0)",
+        timeout: int = 10,
     ):
         """初期化.
         
@@ -220,7 +234,10 @@ class InstagramFullClient:
             username: Instagramのユーザー名(認証用)
             session_file: セッションファイルのパス
             max_posts: 取得する最大投稿数
+            user_agent: ユーザーエージェント
+            timeout: HTTPタイムアウト秒数
         """
+        super().__init__(user_agent=user_agent, timeout=timeout)
         self.username = username
         self.session_file = session_file
         self.max_posts = max_posts
@@ -323,7 +340,7 @@ class InstagramFullClient:
             profile_name: Instagramのプロフィール名
             
         Returns:
-            RSSFeed（取得失敗時はNone）
+            RSSFeed(取得失敗時はNone)
         """
         if not self._instaloader_available:
             logger.error("instaloader が利用できません")
@@ -361,6 +378,8 @@ class InstagramFullClient:
                 link=f"https://www.instagram.com/{profile.username}/",
                 items=items,
             )
+
+            feed.last_build_date = datetime.now()
             
             logger.info(f"プロフィール投稿を取得: {profile_name} ({len(items)}件)")
             return feed

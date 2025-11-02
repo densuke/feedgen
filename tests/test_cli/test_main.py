@@ -63,3 +63,31 @@ user_agent: "test-agent/1.0"
         
         assert result.exit_code != 0
         assert 'Usage:' in result.output or '使用方法:' in result.output
+
+    def test_cli_auto_detects_config_file(self, monkeypatch):
+        """config.yaml が存在する場合に自動的に読み込まれる."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with open('config.yaml', 'w', encoding='utf-8') as f:
+                f.write("max_items: 7\n")
+
+            def fake_load_config(self, path):
+                return {"max_items": 7}
+
+            class DummyFeed:
+                def to_xml(self):
+                    return "<rss></rss>"
+
+            class DummyGenerator:
+                def __init__(self, *args, **kwargs):
+                    self.detect_existing_feeds = lambda url: []
+
+                def generate_feed(self, url, config=None):
+                    return DummyFeed()
+
+            with monkeypatch.context() as mp:
+                mp.setattr('feedgen.cli.main.ConfigManager.load_config', fake_load_config)
+                mp.setattr('feedgen.cli.main.FeedGenerator', DummyGenerator)
+                result = runner.invoke(cli, ['https://example.com'])
+
+            assert result.exit_code == 0

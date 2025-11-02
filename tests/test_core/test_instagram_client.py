@@ -41,6 +41,14 @@ class TestInstagramClient:
         # 非Instagram URLのテスト
         assert not client.is_profile_url("https://twitter.com/username/")
 
+    def test_extract_profile_name(self):
+        """プロフィール名抽出テスト."""
+        client = InstagramClient()
+
+        assert client.extract_profile_name("https://www.instagram.com/username/") == "username"
+        assert client.extract_profile_name("https://www.instagram.com/@username/") == "username"
+        assert client.extract_profile_name("https://www.instagram.com/p/ABC123/") is None
+
     def test_parse_profile_description(self):
         """プロフィール説明のパーステスト."""
         client = InstagramClient()

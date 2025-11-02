@@ -9,6 +9,7 @@ from .models import RSSFeed
 from .parser import HTMLParser
 from .youtube_client import YouTubeAPIClient
 from .google_news_decoder import GoogleNewsDecoderConfig
+from .instagram_client import InstagramClient, InstagramFullClient
 
 
 class FeedGenerator:
@@ -38,6 +39,7 @@ class FeedGenerator:
         self.feed_detector = FeedDetector()
         self.youtube_client = None
         self.instagram_client = None
+        self.use_instagram_full_client = use_instagram_full_client
 
         # YouTube APIキーが提供されている場合はクライアントを初期化
         if youtube_api_key:
@@ -50,15 +52,13 @@ class FeedGenerator:
         # Instagramクライアントを初期化
         if use_instagram_full_client:
             # フル機能版を使用
-            from feedgen.core.instagram_client import InstagramFullClient
             self.instagram_client = InstagramFullClient(
                 username=instagram_username,
                 session_file=instagram_session_file,
-                max_posts=instagram_max_posts
+                max_posts=instagram_max_posts,
             )
         else:
             # 軽量版を使用
-            from feedgen.core.instagram_client import InstagramClient
             self.instagram_client = InstagramClient()
 
     def detect_existing_feeds(self, url: str) -> list[dict]:
@@ -247,13 +247,41 @@ class FeedGenerator:
                 "現在はInstagramプロフィールURLのみ対応しています。"
                 "例: https://www.instagram.com/username/"
             )
-        
-        # プロフィール情報を取得
+
+        profile_name = self.instagram_client.extract_profile_name(url)
+        if not profile_name:
+            raise FeedGenerationError(
+                "Instagramプロフィール名の抽出に失敗しました。"
+                "プロフィールURLを確認してください。"
+            )
+
+        # フルクライアントが利用可能な場合は投稿取得を試行
+        if isinstance(self.instagram_client, InstagramFullClient):
+            if self.instagram_client.is_available():
+                # max_itemsが指定されている場合は上限を反映
+                if hasattr(self.instagram_client, "max_posts") and max_items:
+                    self.instagram_client.max_posts = min(
+                        getattr(self.instagram_client, "max_posts", max_items),
+                        max_items,
+                    )
+
+                # セッションファイル等が設定されていればログインを試みる
+                login_method = getattr(self.instagram_client, "login", None)
+                if callable(login_method):
+                    login_method()
+
+                full_feed = self.instagram_client.fetch_profile_posts(profile_name)
+                if full_feed:
+                    if full_feed.last_build_date is None:
+                        full_feed.last_build_date = datetime.now()
+                    return full_feed
+
+        # フル機能が利用できない場合は軽量版のプロフィール情報を利用
         feed_data = self.instagram_client.fetch_profile_metadata(url)
-        
+
         if not feed_data:
             raise FeedGenerationError(f"Instagram プロフィール情報の取得に失敗しました: {url}")
-        
+
         # RSSFeedに変換
         feed = RSSFeed(
             title=feed_data.title,
@@ -262,5 +290,5 @@ class FeedGenerator:
             items=feed_data.items,
             last_build_date=datetime.now(),
         )
-        
+
         return feed

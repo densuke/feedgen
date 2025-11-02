@@ -1,6 +1,7 @@
 """FeedGeneratorクラスのテスト."""
 
 import pytest
+from unittest.mock import MagicMock, patch
 from feedgen.core import FeedGenerator, RSSFeed
 from feedgen.core.exceptions import FeedGenerationError
 
@@ -54,6 +55,39 @@ class TestFeedGenerator:
         
         with pytest.raises(FeedGenerationError):
             generator.generate_feed(unreachable_url)
+
+    def test_generate_instagram_feed_with_full_client(self):
+        """Instagramフルクライアントが投稿取得を利用する."""
+        profile_url = "https://www.instagram.com/testuser/"
+        mock_feed = RSSFeed(
+            title="Test User (@testuser) - Instagram",
+            description="bio",
+            link=profile_url,
+            items=[],
+        )
+
+        with patch.dict("sys.modules", {"instaloader": MagicMock()}):
+            generator = FeedGenerator(
+                instagram_username="testuser",
+                instagram_session_file="/tmp/session",
+                instagram_max_posts=10,
+                use_instagram_full_client=True,
+            )
+
+        client = generator.instagram_client
+        client.is_available = MagicMock(return_value=True)
+        client.login = MagicMock(return_value=True)
+        client.fetch_profile_posts = MagicMock(return_value=mock_feed)
+        client.fetch_profile_metadata = MagicMock()
+        client.max_posts = 10
+
+        feed = generator.generate_feed(profile_url, config={"max_items": 3})
+
+        assert feed is mock_feed
+        assert feed.last_build_date is not None
+        assert client.max_posts == 3
+        client.fetch_profile_posts.assert_called_once_with("testuser")
+        client.fetch_profile_metadata.assert_not_called()
 
 
 class TestRSSFeed:

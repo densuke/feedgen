@@ -1,5 +1,6 @@
 """CLIメイン機能."""
 
+import os
 import sys
 from pathlib import Path
 
@@ -58,10 +59,24 @@ def cli(url: str, config: str | None, output: str | None,
         # デフォルト設定を取得
         feed_config = config_manager.get_default_config()
         
-        # 設定ファイルがある場合は読み込んでマージ
+        # 設定ファイルを判定（優先順位: --config > FEEDGEN_CONFIG > config.yaml/config.yml）
+        config_candidates: list[Path] = []
         if config:
+            config_candidates.append(Path(config))
+        else:
+            env_config = os.getenv("FEEDGEN_CONFIG")
+            if env_config:
+                config_candidates.append(Path(env_config))
+            else:
+                for candidate_name in ("config.yaml", "config.yml"):
+                    candidate_path = Path(candidate_name)
+                    if candidate_path.exists():
+                        config_candidates.append(candidate_path)
+                        break
+
+        for config_path in config_candidates:
             try:
-                file_config = config_manager.load_config(config)
+                file_config = config_manager.load_config(str(config_path))
                 feed_config = config_manager.merge_configs(feed_config, file_config)
             except (FileNotFoundError, Exception) as e:
                 click.echo(f"設定ファイル読み込みエラー: {e}", err=True)
@@ -157,10 +172,16 @@ def cli(url: str, config: str | None, output: str | None,
         google_news_config = config_manager.get_google_news_config(feed_config)
 
         # Instagram設定を取得
-        instagram_username = getattr(config_manager, 'get_instagram_username', lambda: None)()
-        instagram_session_file = getattr(config_manager, 'get_instagram_session_file', lambda: None)()
-        instagram_max_posts = getattr(config_manager, 'get_instagram_max_posts', lambda: 20)()
-        use_instagram_full_client = getattr(config_manager, 'use_instagram_full_client', lambda: False)()
+        instagram_config = feed_config.get("instagram", {})
+        instagram_username = instagram_config.get("username") or os.getenv("INSTAGRAM_USERNAME")
+        instagram_session_file = instagram_config.get("session_file") or os.getenv("INSTAGRAM_SESSION_FILE")
+        instagram_max_posts = instagram_config.get("max_posts", 20)
+        use_instagram_full_client = instagram_config.get("use_full_client", False)
+
+        if instagram_username == "":
+            instagram_username = None
+        if instagram_session_file == "":
+            instagram_session_file = None
 
         generator = FeedGenerator(
             youtube_api_key=youtube_api_key,
