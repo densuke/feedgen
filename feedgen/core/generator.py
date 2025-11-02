@@ -14,19 +14,31 @@ from .google_news_decoder import GoogleNewsDecoderConfig
 class FeedGenerator:
     """RSSフィード生成クラス."""
 
-    def __init__(self, youtube_api_key: str | None = None, google_news_config: GoogleNewsDecoderConfig | None = None) -> None:
+    def __init__(
+        self,
+        youtube_api_key: str | None = None,
+        google_news_config: GoogleNewsDecoderConfig | None = None,
+        instagram_username: str | None = None,
+        instagram_session_file: str | None = None,
+        instagram_max_posts: int = 20,
+        use_instagram_full_client: bool = False
+    ) -> None:
         """初期化.
-        
+
         Args:
             youtube_api_key: YouTube Data API v3のAPIキー
             google_news_config: Google News設定
+            instagram_username: Instagram認証用ユーザー名
+            instagram_session_file: Instagramセッションファイルパス
+            instagram_max_posts: Instagram最大投稿取得数
+            use_instagram_full_client: Instagramフル機能版使用フラグ
         """
         self.google_news_config = google_news_config
         self.parser = HTMLParser(google_news_config=google_news_config)
         self.feed_detector = FeedDetector()
         self.youtube_client = None
         self.instagram_client = None
-        
+
         # YouTube APIキーが提供されている場合はクライアントを初期化
         if youtube_api_key:
             try:
@@ -34,10 +46,20 @@ class FeedGenerator:
             except YouTubeAPIError:
                 # APIキーが無効な場合はNoneのまま（フォールバック）
                 self.youtube_client = None
-        
+
         # Instagramクライアントを初期化
-        from feedgen.core.instagram_client import InstagramClient
-        self.instagram_client = InstagramClient()
+        if use_instagram_full_client:
+            # フル機能版を使用
+            from feedgen.core.instagram_client import InstagramFullClient
+            self.instagram_client = InstagramFullClient(
+                username=instagram_username,
+                session_file=instagram_session_file,
+                max_posts=instagram_max_posts
+            )
+        else:
+            # 軽量版を使用
+            from feedgen.core.instagram_client import InstagramClient
+            self.instagram_client = InstagramClient()
 
     def detect_existing_feeds(self, url: str) -> list[dict]:
         """既存フィードを検出.

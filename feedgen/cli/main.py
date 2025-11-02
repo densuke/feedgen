@@ -152,11 +152,24 @@ def cli(url: str, config: str | None, output: str | None,
         # フィード生成（従来の動作）
         # YouTube API Keyを設定ファイルから取得（メソッドが存在する場合）
         youtube_api_key = getattr(config_manager, 'get_youtube_api_key', lambda: None)()
-        
+
         # Google News設定を取得
         google_news_config = config_manager.get_google_news_config(feed_config)
-        
-        generator = FeedGenerator(youtube_api_key=youtube_api_key, google_news_config=google_news_config)
+
+        # Instagram設定を取得
+        instagram_username = getattr(config_manager, 'get_instagram_username', lambda: None)()
+        instagram_session_file = getattr(config_manager, 'get_instagram_session_file', lambda: None)()
+        instagram_max_posts = getattr(config_manager, 'get_instagram_max_posts', lambda: 20)()
+        use_instagram_full_client = getattr(config_manager, 'use_instagram_full_client', lambda: False)()
+
+        generator = FeedGenerator(
+            youtube_api_key=youtube_api_key,
+            google_news_config=google_news_config,
+            instagram_username=instagram_username,
+            instagram_session_file=instagram_session_file,
+            instagram_max_posts=instagram_max_posts,
+            use_instagram_full_client=use_instagram_full_client
+        )
 
         # フィード検出を行う
         if use_feed or feed_first:

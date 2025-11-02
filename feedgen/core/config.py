@@ -103,8 +103,67 @@ class ConfigManager:
     
     def has_config_file(self) -> bool:
         """設定ファイルが存在するかを確認.
-        
+
         Returns:
             設定ファイルが存在する場合True
         """
         return self.config_path is not None
+
+    def get_instagram_config(self) -> Dict[str, Any]:
+        """Instagram設定を取得.
+
+        Returns:
+            Instagram設定辞書（設定されていない場合は空辞書）
+        """
+        config = self.load_config()
+        return config.get("instagram", {})
+
+    def get_instagram_username(self) -> str | None:
+        """Instagram認証用ユーザー名を取得.
+
+        Returns:
+            ユーザー名（設定されていない場合はNone）
+        """
+        instagram_config = self.get_instagram_config()
+        username = instagram_config.get("username")
+
+        # 空文字列の場合はNoneを返す
+        if not username:
+            return None
+
+        # 環境変数からも取得を試す
+        return username or os.getenv("INSTAGRAM_USERNAME")
+
+    def get_instagram_session_file(self) -> str | None:
+        """Instagramセッションファイルパスを取得.
+
+        Returns:
+            セッションファイルパス（設定されていない場合はNone）
+        """
+        instagram_config = self.get_instagram_config()
+        session_file = instagram_config.get("session_file")
+
+        # 空文字列の場合はNoneを返す
+        if not session_file:
+            return None
+
+        # 環境変数からも取得を試す
+        return session_file or os.getenv("INSTAGRAM_SESSION_FILE")
+
+    def use_instagram_full_client(self) -> bool:
+        """Instagramフル機能版使用フラグを取得.
+
+        Returns:
+            フル機能版を使用する場合True（デフォルト: False）
+        """
+        instagram_config = self.get_instagram_config()
+        return instagram_config.get("use_full_client", False)
+
+    def get_instagram_max_posts(self) -> int:
+        """Instagram最大投稿取得数を取得.
+
+        Returns:
+            最大投稿取得数（デフォルト: 20）
+        """
+        instagram_config = self.get_instagram_config()
+        return instagram_config.get("max_posts", 20)
