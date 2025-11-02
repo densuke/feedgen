@@ -20,6 +20,11 @@ dependencies = [
     "uvicorn[standard]>=0.35.0",
 ]
 
+[project.optional-dependencies]
+instagram = [
+    "instaloader>=4.14.2",
+]
+
 [project.scripts]
 feedgen = "feedgen.cli.main:cli"
 feedgen-serve = "feedgen.cli.webapi:serve"

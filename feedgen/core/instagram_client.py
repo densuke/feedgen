@@ -199,3 +199,226 @@ class InstagramClient:
             return f"{stats}\n\n{profile_info['bio']}"
         
         return stats
+
+
+
+class InstagramFullClient:
+    """Instagram専用クライアント(instaloader使用フル実装版).
+    
+    投稿詳細の取得が可能だが、認証が必要。
+    """
+
+    def __init__(
+        self,
+        username: str | None = None,
+        session_file: str | None = None,
+        max_posts: int = 20,
+    ):
+        """初期化.
+        
+        Args:
+            username: Instagramのユーザー名(認証用)
+            session_file: セッションファイルのパス
+            max_posts: 取得する最大投稿数
+        """
+        self.username = username
+        self.session_file = session_file
+        self.max_posts = max_posts
+        self._loader = None
+        self._instaloader_available = False
+        
+        # instaloaderのインポートを試行
+        try:
+            import instaloader
+            self._instaloader = instaloader
+            self._instaloader_available = True
+            logger.info("instaloader が利用可能です")
+        except ImportError:
+            logger.warning(
+                "instaloader がインストールされていません。"
+                "フル機能を使用するには 'pip install instaloader' を実行してください。"
+            )
+
+    def is_available(self) -> bool:
+        """instaloaderが利用可能かを確認.
+        
+        Returns:
+            instaloaderが利用可能な場合True
+        """
+        return self._instaloader_available
+
+    def _get_loader(self):
+        """Instaloaderインスタンスを取得(遅延初期化).
+        
+        Returns:
+            Instaloaderインスタンス
+            
+        Raises:
+            ImportError: instaloaderが利用不可の場合
+        """
+        if not self._instaloader_available:
+            raise ImportError(
+                "instaloader がインストールされていません。"
+                "'pip install instaloader' を実行してください。"
+            )
+        
+        if self._loader is None:
+            self._loader = self._instaloader.Instaloader(
+                download_pictures=False,
+                download_videos=False,
+                download_video_thumbnails=False,
+                download_geotags=False,
+                download_comments=False,
+                save_metadata=False,
+                compress_json=False,
+            )
+        
+        return self._loader
+
+    def login(self, password: str | None = None) -> bool:
+        """Instagramにログイン.
+        
+        Args:
+            password: パスワード(省略時はセッションファイルから読み込み)
+            
+        Returns:
+            ログイン成功時True
+        """
+        if not self._instaloader_available:
+            logger.error("instaloader が利用できません")
+            return False
+        
+        loader = self._get_loader()
+        
+        try:
+            # セッションファイルからの読み込みを試行
+            if self.session_file and self.username:
+                loader.load_session_from_file(self.username, self.session_file)
+                logger.info(f"セッションファイルからログイン: {self.username}")
+                return True
+            
+            # パスワードによるログイン
+            if self.username and password:
+                loader.login(self.username, password)
+                logger.info(f"パスワードでログイン: {self.username}")
+                
+                # セッションを保存
+                if self.session_file:
+                    loader.save_session_to_file(self.session_file)
+                    logger.info(f"セッションを保存: {self.session_file}")
+                
+                return True
+            
+            logger.warning("ユーザー名とパスワード、またはセッションファイルが必要です")
+            return False
+            
+        except Exception as e:
+            logger.error(f"ログインエラー: {e}")
+            return False
+
+    def fetch_profile_posts(self, profile_name: str) -> Optional[RSSFeed]:
+        """プロフィールの投稿を取得してRSSFeedを生成.
+        
+        Args:
+            profile_name: Instagramのプロフィール名
+            
+        Returns:
+            RSSFeed（取得失敗時はNone）
+        """
+        if not self._instaloader_available:
+            logger.error("instaloader が利用できません")
+            return None
+        
+        loader = self._get_loader()
+        
+        try:
+            # プロフィールを取得
+            profile = self._instaloader.Profile.from_username(loader.context, profile_name)
+            
+            # RSSアイテムのリスト
+            items = []
+            
+            # 投稿を取得
+            post_count = 0
+            for post in profile.get_posts():
+                if post_count >= self.max_posts:
+                    break
+                
+                # 投稿をRSSItemに変換
+                item = RSSItem(
+                    title=self._get_post_title(post),
+                    link=f"https://www.instagram.com/p/{post.shortcode}/",
+                    description=self._format_post_description(post),
+                    pub_date=post.date_utc,
+                )
+                items.append(item)
+                post_count += 1
+            
+            # RSSFeedを生成
+            feed = RSSFeed(
+                title=f"{profile.full_name} (@{profile.username}) - Instagram",
+                description=profile.biography or f"{profile.username}のInstagramフィード",
+                link=f"https://www.instagram.com/{profile.username}/",
+                items=items,
+            )
+            
+            logger.info(f"プロフィール投稿を取得: {profile_name} ({len(items)}件)")
+            return feed
+            
+        except Exception as e:
+            logger.error(f"プロフィール投稿取得エラー: {e}")
+            return None
+
+    def _get_post_title(self, post) -> str:
+        """投稿のタイトルを生成.
+        
+        Args:
+            post: Instaloaderの投稿オブジェクト
+            
+        Returns:
+            タイトル文字列
+        """
+        # キャプションの最初の行をタイトルとして使用
+        if post.caption:
+            first_line = post.caption.split('\n')[0]
+            # 長すぎる場合は切り詰め
+            if len(first_line) > 100:
+                return first_line[:97] + "..."
+            return first_line
+        
+        # キャプションがない場合
+        if post.is_video:
+            return f"動画投稿 - {post.date_utc.strftime('%Y-%m-%d')}"
+        else:
+            return f"写真投稿 - {post.date_utc.strftime('%Y-%m-%d')}"
+
+    def _format_post_description(self, post) -> str:
+        """投稿の説明を生成.
+        
+        Args:
+            post: Instaloaderの投稿オブジェクト
+            
+        Returns:
+            説明文字列
+        """
+        parts = []
+        
+        # 投稿タイプ
+        if post.is_video:
+            parts.append("📹 動画投稿")
+        elif post.typename == "GraphSidecar":
+            parts.append(f"🖼️ 複数画像投稿 ({post.mediacount}枚)")
+        else:
+            parts.append("🖼️ 画像投稿")
+        
+        # いいね数とコメント数
+        parts.append(f"❤️ {post.likes:,} いいね")
+        parts.append(f"💬 {post.comments:,} コメント")
+        
+        stats = " | ".join(parts)
+        
+        # キャプション
+        if post.caption:
+            return f"{stats}\n\n{post.caption}"
+        
+        return stats
