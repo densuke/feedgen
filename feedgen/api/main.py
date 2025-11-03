@@ -8,7 +8,7 @@ from fastapi.responses import Response
 
 from ..core import FeedGenerator
 from ..cli.config import ConfigManager
-from ..core.exceptions import FeedGenerationError, ParseError
+from ..core.exceptions import FeedGenerationError, ParseError, InstagramAuthError, InstagramRateLimitError
 
 app = FastAPI(
     title="feedgen API",
@@ -53,7 +53,7 @@ async def generate_feed(
     google_news_interval: Optional[int] = Query(1, description="Google Newsデコード処理間隔（秒）", ge=1, le=60),
     google_news_timeout: Optional[int] = Query(10, description="Google Newsデコード処理タイムアウト（秒）", ge=5, le=120),
     google_news_cache_ttl: Optional[int] = Query(86400, description="Google Newsキャッシュ有効期限（秒）", ge=300, le=604800),
-    google_news_cache_type: Optional[str] = Query("memory", description="Google Newsキャッシュタイプ", regex="^(memory|redis)$"),
+    google_news_cache_type: Optional[str] = Query("memory", description="Google Newsキャッシュタイプ", pattern="^(memory|redis)$"),
 ):
     """RSSフィードを生成または代理取得する.
     
@@ -179,6 +179,24 @@ async def generate_feed(
             headers=headers,
         )
         
+    except InstagramAuthError as e:
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "error": "Instagram認証エラー",
+                "message": str(e),
+                "recommendation": "InstagramFullClientの設定を検討してください。詳細はREADME.mdを参照。"
+            }
+        )
+    except InstagramRateLimitError as e:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "Instagramレート制限",
+                "message": str(e),
+                "recommendation": "しばらく待ってから再度アクセスするか、InstagramFullClientの設定を検討してください。"
+            }
+        )
     except (FeedGenerationError, ParseError) as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

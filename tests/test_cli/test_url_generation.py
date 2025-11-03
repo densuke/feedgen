@@ -52,10 +52,12 @@ class TestCLIURLGeneration:
 
     def test_generate_url_without_api_host_fails(self):
         """APIホスト未指定でのURL生成がエラーになることをテスト."""
-        result = self.runner.invoke(cli, [
-            "--generate-url",
-            "https://target.com"
-        ])
+        # 隔離されたファイルシステムを使用して、config.yamlの自動検索を防ぐ
+        with self.runner.isolated_filesystem():
+            result = self.runner.invoke(cli, [
+                "--generate-url",
+                "https://target.com"
+            ])
         
         assert result.exit_code == 1
         assert "APIホストが指定されていません" in result.output
@@ -159,11 +161,13 @@ max_items: 30
 
     def test_generate_url_validates_invalid_host(self):
         """無効なホストの検証をテスト."""
-        result = self.runner.invoke(cli, [
-            "--generate-url",
-            "--api-host", "",  # 空文字
-            "https://target.com"
-        ])
+        # 隔離されたファイルシステムを使用して、config.yamlの自動検索を防ぐ
+        with self.runner.isolated_filesystem():
+            result = self.runner.invoke(cli, [
+                "--generate-url",
+                "--api-host", "",  # 空文字
+                "https://target.com"
+            ])
         
         assert result.exit_code == 1
         assert "APIホストが指定されていません" in result.output

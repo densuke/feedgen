@@ -32,3 +32,13 @@ class ParseError(Exception):
 class YouTubeAPIError(FeedGenerationError):
     """YouTube API関連のエラー."""
     pass
+
+
+class InstagramAuthError(FeedGenerationError):
+    """Instagram認証エラー."""
+    pass
+
+
+class InstagramRateLimitError(FeedGenerationError):
+    """Instagramレート制限エラー."""
+    pass

@@ -222,7 +222,12 @@ class TestRedisURLDecodeCache:
         """Redis統計情報取得をテスト."""
         mock_redis_client = Mock()
         mock_redis_client.ping.return_value = True
-        mock_redis_client.keys.return_value = ["key1", "key2"]
+        # get()は最初Noneを返す（キャッシュミス）
+        mock_redis_client.get.return_value = None
+        # set()は何も返さない
+        mock_redis_client.setex.return_value = None
+        # keys()は実際のキャッシュ操作後に1個のキーを返す
+        mock_redis_client.keys.return_value = ["feedgen:gnews:abc123"]
         mock_redis_client.info.return_value = {
             "used_memory_human": "1.5M",
             "connected_clients": 3
@@ -240,7 +245,7 @@ class TestRedisURLDecodeCache:
         assert stats["hits"] == 0
         assert stats["misses"] == 1
         assert stats["sets"] == 1
-        assert stats["size"] == 2
+        assert stats["size"] == 1
         assert stats["redis_info"]["used_memory"] == "1.5M"
         assert stats["redis_info"]["connected_clients"] == 3
 

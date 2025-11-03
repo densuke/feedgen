@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import logging
 import re
+import time
 from datetime import datetime
 from typing import Optional
 from urllib.parse import urlparse
@@ -9,8 +10,78 @@ import httpx
 from bs4 import BeautifulSoup
 
 from feedgen.core.models import RSSFeed, RSSItem
+from feedgen.core.exceptions import InstagramAuthError, InstagramRateLimitError
 
 logger = logging.getLogger(__name__)
+
+
+class InstagramCache:
+    """Instagram プロフィール取得結果のキャッシュ."""
+
+    def __init__(self, ttl: int = 300):
+        """初期化.
+
+        Args:
+            ttl: キャッシュの有効期限(秒)、デフォルト5分
+        """
+        self.ttl = ttl
+        self._cache: dict[str, tuple[RSSFeed, float]] = {}
+        self._stats = {"hits": 0, "misses": 0}
+
+    def get(self, url: str) -> Optional[RSSFeed]:
+        """キャッシュから取得.
+
+        Args:
+            url: プロフィールURL
+
+        Returns:
+            キャッシュされたRSSFeed(期限切れまたは存在しない場合はNone)
+        """
+        if url not in self._cache:
+            self._stats["misses"] += 1
+            return None
+
+        feed, timestamp = self._cache[url]
+        if time.time() - timestamp > self.ttl:
+            # 期限切れ
+            del self._cache[url]
+            self._stats["misses"] += 1
+            return None
+
+        self._stats["hits"] += 1
+        logger.info(f"Instagram キャッシュヒット: {url}")
+        return feed
+
+    def set(self, url: str, feed: RSSFeed) -> None:
+        """キャッシュに保存.
+
+        Args:
+            url: プロフィールURL
+            feed: RSSFeed
+        """
+        self._cache[url] = (feed, time.time())
+        logger.info(f"Instagram キャッシュ保存: {url}")
+
+    def clear(self) -> None:
+        """キャッシュをクリア."""
+        self._cache.clear()
+        logger.info("Instagram キャッシュクリア")
+
+    def get_stats(self) -> dict:
+        """統計情報を取得.
+
+        Returns:
+            統計情報
+        """
+        total_requests = self._stats["hits"] + self._stats["misses"]
+        hit_rate = self._stats["hits"] / total_requests if total_requests > 0 else 0
+
+        return {
+            "hits": self._stats["hits"],
+            "misses": self._stats["misses"],
+            "size": len(self._cache),
+            "hit_rate": hit_rate,
+        }
 
 
 class InstagramClient:
@@ -20,15 +91,21 @@ class InstagramClient:
         self,
         user_agent: str = "Mozilla/5.0 (compatible; feedgen/1.0)",
         timeout: int = 10,
+        cache_ttl: int = 300,
+        max_retries: int = 3,
     ):
         """初期化.
-        
+
         Args:
             user_agent: ユーザーエージェント
             timeout: タイムアウト秒数
+            cache_ttl: キャッシュ有効期限(秒)、デフォルト5分
+            max_retries: 最大リトライ回数
         """
         self.user_agent = user_agent
         self.timeout = timeout
+        self.max_retries = max_retries
+        self._cache = InstagramCache(ttl=cache_ttl)
 
     def is_instagram_url(self, url: str) -> bool:
         """Instagram URLかどうかを判定.
@@ -92,55 +169,100 @@ class InstagramClient:
 
     def fetch_profile_metadata(self, url: str) -> Optional[RSSFeed]:
         """プロフィールページからmetaタグを取得してRSSFeedを生成.
-        
+
         Args:
             url: InstagramプロフィールURL
-            
+
         Returns:
             RSSFeed(取得失敗時はNone)
         """
-        try:
-            headers = {"User-Agent": self.user_agent}
-            response = httpx.get(url, headers=headers, timeout=self.timeout, follow_redirects=True)
-            response.raise_for_status()
+        # キャッシュチェック
+        cached_feed = self._cache.get(url)
+        if cached_feed:
+            return cached_feed
 
-            soup = BeautifulSoup(response.text, "html.parser")
+        # リトライロジック付きで取得
+        for attempt in range(self.max_retries):
+            try:
+                headers = {"User-Agent": self.user_agent}
+                response = httpx.get(url, headers=headers, timeout=self.timeout, follow_redirects=True)
 
-            # metaタグからデータを取得
-            title = self._extract_meta_content(soup, "og:title") or "Instagram Profile"
-            description = self._extract_meta_content(soup, "og:description") or ""
-            image = self._extract_meta_content(soup, "og:image")
+                # ログインページへのリダイレクトを検出
+                if "/accounts/login/" in response.url.path:
+                    error_msg = (
+                        f"Instagram認証が必要: プロフィール '{url}' へのアクセスには認証が必要です。"
+                        "InstagramFullClientの使用を検討してください。"
+                    )
+                    logger.error(error_msg)
+                    raise InstagramAuthError(error_msg)
 
-            # プロフィール情報をパース
-            profile_info = self._parse_profile_description(description)
+                response.raise_for_status()
 
-            # 現在の軽量実装では投稿詳細は取得できないため、
-            # プロフィール情報のみをRSSItemとして追加
-            items = []
-            if profile_info:
-                item = RSSItem(
-                    title=f"{title}のプロフィール",
+                soup = BeautifulSoup(response.text, "html.parser")
+
+                # metaタグからデータを取得
+                title = self._extract_meta_content(soup, "og:title") or "Instagram Profile"
+                description = self._extract_meta_content(soup, "og:description") or ""
+                image = self._extract_meta_content(soup, "og:image")
+
+                # プロフィール情報をパース
+                profile_info = self._parse_profile_description(description)
+
+                # 現在の軽量実装では投稿詳細は取得できないため、
+                # プロフィール情報のみをRSSItemとして追加
+                items = []
+                if profile_info:
+                    item = RSSItem(
+                        title=f"{title}のプロフィール",
+                        link=url,
+                        description=self._format_profile_info(profile_info),
+                    )
+                    items.append(item)
+
+                feed_data = RSSFeed(
+                    title=title,
+                    description=profile_info.get("bio", description),
                     link=url,
-                    description=self._format_profile_info(profile_info),
+                    items=items,
                 )
-                items.append(item)
-            
-            feed_data = RSSFeed(
-                title=title,
-                description=profile_info.get("bio", description),
-                link=url,
-                items=items,
-            )
 
-            logger.info(f"Instagram プロフィール情報を取得: {url}")
-            return feed_data
+                # キャッシュに保存
+                self._cache.set(url, feed_data)
 
-        except httpx.HTTPError as e:
-            logger.error(f"Instagram プロフィール取得エラー: {e}")
-            return None
-        except Exception as e:
-            logger.error(f"Instagram パースエラー: {e}")
-            return None
+                logger.info(f"Instagram プロフィール情報を取得: {url}")
+                return feed_data
+
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 429:
+                    # レート制限エラー
+                    wait_time = 2 ** attempt  # エクスポネンシャルバックオフ
+                    logger.warning(
+                        f"Instagram レート制限(429): {url} - "
+                        f"リトライ {attempt + 1}/{self.max_retries} "
+                        f"(待機: {wait_time}秒)"
+                    )
+                    if attempt < self.max_retries - 1:
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        error_msg = (
+                            f"Instagramレート制限: 最大リトライ回数に達しました。"
+                            "しばらく待ってから再度アクセスするか、InstagramFullClientの使用を検討してください。"
+                        )
+                        logger.error(error_msg)
+                        raise InstagramRateLimitError(error_msg)
+                else:
+                    logger.error(f"Instagram HTTPエラー {e.response.status_code}: {url}")
+                    return None
+
+            except httpx.HTTPError as e:
+                logger.error(f"Instagram プロフィール取得エラー: {e}")
+                return None
+            except Exception as e:
+                logger.error(f"Instagram パースエラー: {e}")
+                return None
+
+        return None
 
     def _extract_meta_content(self, soup: BeautifulSoup, property_name: str) -> Optional[str]:
         """metaタグからcontentを取得.
@@ -216,7 +338,7 @@ class InstagramClient:
         return stats
 class InstagramFullClient(InstagramClient):
     """Instagram専用クライアント(instaloader使用フル実装版).
-    
+
     投稿詳細の取得が可能だが、認証が必要。
     """
 
@@ -227,17 +349,21 @@ class InstagramFullClient(InstagramClient):
         max_posts: int = 20,
         user_agent: str = "Mozilla/5.0 (compatible; feedgen/1.0)",
         timeout: int = 10,
+        cache_ttl: int = 300,
+        max_retries: int = 3,
     ):
         """初期化.
-        
+
         Args:
             username: Instagramのユーザー名(認証用)
             session_file: セッションファイルのパス
             max_posts: 取得する最大投稿数
             user_agent: ユーザーエージェント
             timeout: HTTPタイムアウト秒数
+            cache_ttl: キャッシュ有効期限(秒)
+            max_retries: 最大リトライ回数
         """
-        super().__init__(user_agent=user_agent, timeout=timeout)
+        super().__init__(user_agent=user_agent, timeout=timeout, cache_ttl=cache_ttl, max_retries=max_retries)
         self.username = username
         self.session_file = session_file
         self.max_posts = max_posts
@@ -335,32 +461,40 @@ class InstagramFullClient(InstagramClient):
 
     def fetch_profile_posts(self, profile_name: str) -> Optional[RSSFeed]:
         """プロフィールの投稿を取得してRSSFeedを生成.
-        
+
         Args:
             profile_name: Instagramのプロフィール名
-            
+
         Returns:
             RSSFeed(取得失敗時はNone)
         """
         if not self._instaloader_available:
             logger.error("instaloader が利用できません")
             return None
-        
+
+        # キャッシュキー生成
+        cache_url = f"https://www.instagram.com/{profile_name}/"
+
+        # キャッシュチェック
+        cached_feed = self._cache.get(cache_url)
+        if cached_feed:
+            return cached_feed
+
         loader = self._get_loader()
-        
+
         try:
             # プロフィールを取得
             profile = self._instaloader.Profile.from_username(loader.context, profile_name)
-            
+
             # RSSアイテムのリスト
             items = []
-            
+
             # 投稿を取得
             post_count = 0
             for post in profile.get_posts():
                 if post_count >= self.max_posts:
                     break
-                
+
                 # 投稿をRSSItemに変換
                 item = RSSItem(
                     title=self._get_post_title(post),
@@ -370,7 +504,7 @@ class InstagramFullClient(InstagramClient):
                 )
                 items.append(item)
                 post_count += 1
-            
+
             # RSSFeedを生成
             feed = RSSFeed(
                 title=f"{profile.full_name} (@{profile.username}) - Instagram",
@@ -380,10 +514,13 @@ class InstagramFullClient(InstagramClient):
             )
 
             feed.last_build_date = datetime.now()
-            
+
+            # キャッシュに保存
+            self._cache.set(cache_url, feed)
+
             logger.info(f"プロフィール投稿を取得: {profile_name} ({len(items)}件)")
             return feed
-            
+
         except Exception as e:
             logger.error(f"プロフィール投稿取得エラー: {e}")
             return None

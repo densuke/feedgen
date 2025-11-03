@@ -111,9 +111,10 @@ def cli(url: str, config: str | None, output: str | None,
         # URL生成モード
         if generate_url:
             # APIホストを決定（優先順位: コマンドライン > 設定ファイル）
-            api_base_url = api_host or feed_config.get("api_base_url")
+            api_base_url = api_host if api_host else feed_config.get("api_base_url")
             
-            if not api_base_url:
+            # APIホストが未指定または空文字でないかチェック
+            if not api_base_url or (isinstance(api_base_url, str) and api_base_url.strip() == ""):
                 click.echo(
                     "エラー: APIホストが指定されていません。\n"
                     "--api-host オプションを使用するか、設定ファイルで api_base_url を設定してください。",

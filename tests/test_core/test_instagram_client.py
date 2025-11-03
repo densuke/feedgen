@@ -84,7 +84,7 @@ class TestInstagramClient:
     def test_fetch_profile_metadata_success(self, mock_get):
         """プロフィール情報取得成功テスト."""
         client = InstagramClient()
-        
+
         # モックHTMLレスポンス
         mock_html = """
         <html>
@@ -95,14 +95,17 @@ class TestInstagramClient:
         </head>
         </html>
         """
-        
+
         mock_response = Mock()
         mock_response.text = mock_html
         mock_response.raise_for_status = Mock()
+        # response.url.pathのモックを追加
+        mock_response.url = Mock()
+        mock_response.url.path = "/testuser/"
         mock_get.return_value = mock_response
-        
+
         result = client.fetch_profile_metadata("https://www.instagram.com/testuser/")
-        
+
         assert result is not None
         assert "テストユーザー" in result.title
         assert result.link == "https://www.instagram.com/testuser/"
