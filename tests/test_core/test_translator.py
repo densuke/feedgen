@@ -147,12 +147,10 @@ class TestTranslator:
 
     def test_translate_feed_partial_failure(self, mock_genai):
         """一部の翻訳が失敗しても処理が続行される."""
-        # 1つ目は成功、2つ目は失敗
+        # タイトルの翻訳は失敗、説明は成功
         mock_responses = [
-            MagicMock(text="翻訳成功"),
-            Exception("Translation failed"),
-            MagicMock(text="Original title"),  # エラー時は元のテキスト
-            MagicMock(text="Original description"),
+            Exception("Translation failed"),  # title翻訳失敗
+            MagicMock(text="翻訳された説明"),  # description翻訳成功
         ]
         mock_genai.GenerativeModel.return_value.generate_content.side_effect = mock_responses
 
@@ -173,9 +171,10 @@ class TestTranslator:
 
         translated_feed = translator.translate_feed(feed)
 
-        # 翻訳が失敗した場合は元のテキストが保持される
+        # タイトルの翻訳が失敗した場合は元のテキストが保持される
         assert translated_feed.items[0].title == "Original title"
-        assert translated_feed.items[0].description == "Original description"
+        # 説明の翻訳は成功
+        assert translated_feed.items[0].description == "翻訳された説明"
 
     def test_translate_text_with_custom_model(self, mock_genai):
         """カスタムモデルを指定できる."""
