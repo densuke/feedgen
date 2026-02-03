@@ -89,16 +89,62 @@ class TestFeedGenerator:
         client.fetch_profile_posts.assert_called_once_with("testuser")
         client.fetch_profile_metadata.assert_not_called()
 
+    def test_generate_feed_with_translation(self):
+        """翻訳有効時にフィードが翻訳される."""
+        mock_translator = MagicMock()
+        mock_translated_feed = MagicMock(spec=RSSFeed)
+        mock_translator.translate_feed.return_value = mock_translated_feed
+
+        generator = FeedGenerator(
+            translation_enabled=True,
+            translator=mock_translator
+        )
+
+        url = "https://example.com"
+        
+        with patch.object(generator.parser, "fetch_content") as mock_fetch:
+            with patch.object(generator.parser, "parse_metadata") as mock_meta:
+                with patch.object(generator.parser, "extract_articles") as mock_items:
+                    mock_fetch.return_value = "<html></html>"
+                    mock_meta.return_value = {"title": "Title", "description": "Desc", "link": url}
+                    mock_items.return_value = []
+                    
+                    feed = generator.generate_feed(url)
+
+                    mock_translator.translate_feed.assert_called_once()
+                    assert feed == mock_translated_feed
+
+    def test_generate_feed_translation_disabled(self):
+        """翻訳無効時は翻訳されない."""
+        mock_translator = MagicMock()
+        
+        generator = FeedGenerator(
+            translation_enabled=False,
+            translator=mock_translator
+        )
+
+        url = "https://example.com"
+        
+        with patch.object(generator.parser, "fetch_content") as mock_fetch:
+            with patch.object(generator.parser, "parse_metadata") as mock_meta:
+                with patch.object(generator.parser, "extract_articles") as mock_items:
+                    mock_fetch.return_value = "<html></html>"
+                    mock_meta.return_value = {"title": "Title", "description": "Desc", "link": url}
+                    mock_items.return_value = []
+                    
+                    generator.generate_feed(url)
+
+                    mock_translator.translate_feed.assert_not_called()
+
 
 class TestRSSFeed:
     """RSSFeedクラスのテスト."""
 
     def test_rssfeed_to_xml(self):
         """RSSFeedがXML文字列として出力できる."""
-        # このテストは実装されたRSSFeedオブジェクトが必要
-        pass  # 実装時に追加
+        pass
 
     def test_rssfeed_to_dict(self):
         """RSSFeedが辞書形式として出力できる."""
-        # このテストは実装されたRSSFeedオブジェクトが必要
-        pass  # 実装時に追加
+        pass
+
