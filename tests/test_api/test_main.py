@@ -1,7 +1,7 @@
 """Web API テスト."""
 
 from fastapi.testclient import TestClient
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, MagicMock
 
 from feedgen.api.main import app
 from feedgen.core.models import RSSFeed, RSSItem
@@ -249,6 +249,85 @@ class TestFeedEndpoint:
         # generate_feedが正しいuser_agentで呼び出されているかを確認
         call_args = mock_generator.generate_feed.call_args
         assert call_args[1]["config"]["user_agent"] == "custom-agent/1.0"
+
+    @patch("feedgen.api.main.FeedGenerator")
+    def test_feed_endpoint_with_translation(self, mock_generator_class):
+        """翻訳パラメータありでのフィード生成をテスト."""
+        # モックの設定
+        mock_generator = Mock()
+        mock_generator_class.return_value = mock_generator
+        mock_generator.detect_existing_feeds.return_value = []
+
+        test_feed = RSSFeed(
+            title="Test Feed",
+            description="Test description",
+            link="https://example.com",
+            items=[],
+        )
+        mock_generator.generate_feed.return_value = test_feed
+
+        # APIを呼び出し
+        response = client.get("/feed?url=https://example.com&translate=true&translation_api_key=test-key")
+
+        assert response.status_code == 200
+
+        # FeedGeneratorがtranslation_enabled=Trueで初期化されたことを確認
+        init_kwargs = mock_generator_class.call_args.kwargs
+        assert init_kwargs.get("translation_enabled") is True
+        assert init_kwargs.get("translator") is not None
+
+    @patch("feedgen.api.main.FeedGenerator")
+    def test_feed_endpoint_without_translation(self, mock_generator_class):
+        """翻訳なしでのフィード生成をテスト."""
+        # モックの設定
+        mock_generator = Mock()
+        mock_generator_class.return_value = mock_generator
+        mock_generator.detect_existing_feeds.return_value = []
+
+        test_feed = RSSFeed(
+            title="Test Feed",
+            description="Test description",
+            link="https://example.com",
+            items=[],
+        )
+        mock_generator.generate_feed.return_value = test_feed
+
+        # APIを呼び出し
+        response = client.get("/feed?url=https://example.com")
+
+        assert response.status_code == 200
+
+        # translation_enabledがFalseまたは未指定であることを確認
+        init_kwargs = mock_generator_class.call_args.kwargs
+        assert init_kwargs.get("translation_enabled", False) is False
+
+    @patch("feedgen.api.main.FeedGenerator")
+    @patch("feedgen.api.main.Translator")
+    def test_feed_endpoint_translation_with_custom_lang(self, mock_translator_class, mock_generator_class):
+        """カスタム翻訳先言語でのフィード生成をテスト."""
+        # モックの設定
+        mock_generator = Mock()
+        mock_generator_class.return_value = mock_generator
+        mock_generator.detect_existing_feeds.return_value = []
+
+        test_feed = RSSFeed(
+            title="Test Feed",
+            description="Test description",
+            link="https://example.com",
+            items=[],
+        )
+        mock_generator.generate_feed.return_value = test_feed
+
+        # APIを呼び出し
+        response = client.get(
+            "/feed?url=https://example.com&translate=true&translation_api_key=test-key&translation_target_lang=ko"
+        )
+
+        assert response.status_code == 200
+
+        # Translatorがtarget_lang='ko'で初期化されたことを確認
+        translator_kwargs = mock_translator_class.call_args.kwargs
+        assert translator_kwargs.get("target_lang") == "ko"
 
 
 class TestAPIDocumentation:
