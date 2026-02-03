@@ -1,6 +1,7 @@
 """CLIメイン機能のテスト."""
 
 from click.testing import CliRunner
+from unittest.mock import patch, MagicMock
 from feedgen.cli.main import cli
 
 
@@ -91,3 +92,70 @@ user_agent: "test-agent/1.0"
                 result = runner.invoke(cli, ['https://example.com'])
 
             assert result.exit_code == 0
+
+    def test_cli_with_translate_option(self):
+        """--translateオプションで翻訳が有効化される."""
+        runner = CliRunner()
+
+        with patch('feedgen.cli.main.FeedGenerator') as mock_gen_class:
+            mock_gen = MagicMock()
+            mock_feed = MagicMock()
+            mock_feed.to_xml.return_value = "<rss></rss>"
+            mock_gen.generate_feed.return_value = mock_feed
+            mock_gen.detect_existing_feeds.return_value = []
+            mock_gen_class.return_value = mock_gen
+
+            result = runner.invoke(cli, [
+                '--translate',
+                '--translation-api-key', 'test-key',
+                'https://example.com'
+            ])
+
+            # FeedGeneratorがtranslation_enabled=Trueで初期化されたことを確認
+            assert result.exit_code == 0
+            call_kwargs = mock_gen_class.call_args.kwargs
+            assert call_kwargs.get('translation_enabled') is True
+            assert call_kwargs.get('translator') is not None
+
+    def test_cli_without_translate_option(self):
+        """--translateオプションなしでは翻訳が無効."""
+        runner = CliRunner()
+
+        with patch('feedgen.cli.main.FeedGenerator') as mock_gen_class:
+            mock_gen = MagicMock()
+            mock_feed = MagicMock()
+            mock_feed.to_xml.return_value = "<rss></rss>"
+            mock_gen.generate_feed.return_value = mock_feed
+            mock_gen.detect_existing_feeds.return_value = []
+            mock_gen_class.return_value = mock_gen
+
+            result = runner.invoke(cli, ['https://example.com'])
+
+            assert result.exit_code == 0
+            call_kwargs = mock_gen_class.call_args.kwargs
+            assert call_kwargs.get('translation_enabled', False) is False
+
+    def test_cli_translate_with_custom_target_lang(self):
+        """--translation-target-langオプションで翻訳先言語を指定できる."""
+        runner = CliRunner()
+
+        with patch('feedgen.cli.main.FeedGenerator') as mock_gen_class:
+            with patch('feedgen.cli.main.Translator') as mock_translator_class:
+                mock_gen = MagicMock()
+                mock_feed = MagicMock()
+                mock_feed.to_xml.return_value = "<rss></rss>"
+                mock_gen.generate_feed.return_value = mock_feed
+                mock_gen.detect_existing_feeds.return_value = []
+                mock_gen_class.return_value = mock_gen
+
+                result = runner.invoke(cli, [
+                    '--translate',
+                    '--translation-api-key', 'test-key',
+                    '--translation-target-lang', 'ko',
+                    'https://example.com'
+                ])
+
+                assert result.exit_code == 0
+                # Translatorがtarget_lang='ko'で初期化されたことを確認
+                call_kwargs = mock_translator_class.call_args.kwargs
+                assert call_kwargs.get('target_lang') == 'ko'
