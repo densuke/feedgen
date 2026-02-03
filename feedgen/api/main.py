@@ -9,6 +9,8 @@ from fastapi.responses import Response
 from ..core import FeedGenerator
 from ..cli.config import ConfigManager
 from ..core.exceptions import FeedGenerationError, ParseError, InstagramAuthError, InstagramRateLimitError
+from ..core.translator import Translator
+from ..core.translation_cache import MemoryTranslationCache, RedisTranslationCache
 
 app = FastAPI(
     title="feedgen API",
@@ -54,6 +56,9 @@ async def generate_feed(
     google_news_timeout: Optional[int] = Query(10, description="Google Newsデコード処理タイムアウト（秒）", ge=5, le=120),
     google_news_cache_ttl: Optional[int] = Query(86400, description="Google Newsキャッシュ有効期限（秒）", ge=300, le=604800),
     google_news_cache_type: Optional[str] = Query("memory", description="Google Newsキャッシュタイプ", pattern="^(memory|redis)$"),
+    translate: Optional[bool] = Query(False, description="翻訳を有効化"),
+    translation_api_key: Optional[str] = Query(None, description="Gemini API キー"),
+    translation_target_lang: Optional[str] = Query("ja", description="翻訳先言語"),
 ):
     """RSSフィードを生成または代理取得する.
     
@@ -118,13 +123,64 @@ async def generate_feed(
         instagram_max_posts = getattr(config_manager, 'get_instagram_max_posts', lambda: 20)()
         use_instagram_full_client = getattr(config_manager, 'use_instagram_full_client', lambda: False)()
 
+        # 翻訳設定を処理
+        translation_enabled = False
+        translator = None
+
+        if translate:
+            translation_config = config_manager.get_translation_config(config)
+
+            # APIパラメータでオーバーライド
+            if translation_api_key:
+                translation_config["api_key"] = translation_api_key
+            if translation_target_lang:
+                translation_config["target_lang"] = translation_target_lang
+
+            # API キーを取得
+            import os
+            api_key = translation_config.get("api_key") or os.getenv("GEMINI_API_KEY")
+            if api_key:
+                # TranslationCacheを作成
+                translation_cache = None
+                if translation_config.get("cache_enabled", True):
+                    cache_type = translation_config.get("cache_type", "memory")
+                    if cache_type == "redis":
+                        try:
+                            translation_cache = RedisTranslationCache(
+                                redis_url=translation_config.get("redis_url", "redis://localhost:6379/0"),
+                                default_ttl=translation_config.get("cache_ttl", 86400)
+                            )
+                        except Exception:
+                            # Redisエラー時はメモリキャッシュにフォールバック
+                            translation_cache = MemoryTranslationCache(
+                                max_size=translation_config.get("cache_max_size", 1000),
+                                default_ttl=translation_config.get("cache_ttl", 86400)
+                            )
+                    else:
+                        translation_cache = MemoryTranslationCache(
+                            max_size=translation_config.get("cache_max_size", 1000),
+                            default_ttl=translation_config.get("cache_ttl", 86400)
+                        )
+
+                # Translatorを作成
+                translator = Translator(
+                    api_key=api_key,
+                    model=translation_config.get("model", "gemini-1.5-flash"),
+                    cache=translation_cache,
+                    target_lang=translation_config.get("target_lang", "ja"),
+                    source_lang=translation_config.get("source_lang", "auto")
+                )
+                translation_enabled = True
+
         generator = FeedGenerator(
             youtube_api_key=youtube_api_key,
             google_news_config=google_news_config,
             instagram_username=instagram_username,
             instagram_session_file=instagram_session_file,
             instagram_max_posts=instagram_max_posts,
-            use_instagram_full_client=use_instagram_full_client
+            use_instagram_full_client=use_instagram_full_client,
+            translation_enabled=translation_enabled,
+            translator=translator
         )
         
         # フィード検出・代理取得ロジック
