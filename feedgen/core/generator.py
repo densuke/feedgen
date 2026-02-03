@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from urllib.parse import urlparse
+from typing import TYPE_CHECKING
 
 from .exceptions import FeedGenerationError, YouTubeAPIError
 from .feed_detector import FeedDetector
@@ -10,6 +11,9 @@ from .parser import HTMLParser
 from .youtube_client import YouTubeAPIClient
 from .google_news_decoder import GoogleNewsDecoderConfig
 from .instagram_client import InstagramClient, InstagramFullClient
+
+if TYPE_CHECKING:
+    from .translator import Translator
 
 
 class FeedGenerator:
@@ -22,7 +26,9 @@ class FeedGenerator:
         instagram_username: str | None = None,
         instagram_session_file: str | None = None,
         instagram_max_posts: int = 20,
-        use_instagram_full_client: bool = False
+        use_instagram_full_client: bool = False,
+        translation_enabled: bool = False,
+        translator: "Translator | None" = None,
     ) -> None:
         """初期化.
 
@@ -33,6 +39,8 @@ class FeedGenerator:
             instagram_session_file: Instagramセッションファイルパス
             instagram_max_posts: Instagram最大投稿取得数
             use_instagram_full_client: Instagramフル機能版使用フラグ
+            translation_enabled: 翻訳機能を有効にするかどうか
+            translator: Translatorインスタンス
         """
         self.google_news_config = google_news_config
         self.parser = HTMLParser(google_news_config=google_news_config)
@@ -40,6 +48,8 @@ class FeedGenerator:
         self.youtube_client = None
         self.instagram_client = None
         self.use_instagram_full_client = use_instagram_full_client
+        self.translation_enabled = translation_enabled
+        self.translator = translator
 
         # YouTube APIキーが提供されている場合はクライアントを初期化
         if youtube_api_key:
@@ -120,54 +130,61 @@ class FeedGenerator:
         if not parsed_url.scheme or not parsed_url.netloc:
             raise FeedGenerationError(f"無効なURLです: {url}")
 
+        feed = None
+
         # YouTube URLかどうかをチェック
         if self.youtube_client and self.youtube_client.can_handle_url(url):
-            return self._generate_youtube_feed(url, max_items)
+            feed = self._generate_youtube_feed(url, max_items)
         
         # Instagram URLかどうかをチェック
-        if self.instagram_client and self.instagram_client.is_instagram_url(url):
-            return self._generate_instagram_feed(url, max_items)
+        elif self.instagram_client and self.instagram_client.is_instagram_url(url):
+            feed = self._generate_instagram_feed(url, max_items)
 
         # Google News設定の更新（設定が変更されている場合）
-        google_news_config_dict = config.get("google_news", {})
-        if google_news_config_dict:
-            google_news_config = GoogleNewsDecoderConfig.from_dict(google_news_config_dict)
-            # 設定が変更されている場合はパーサーを再作成
-            if google_news_config.decode_enabled != (self.google_news_config and self.google_news_config.decode_enabled):
-                self.google_news_config = google_news_config
-                self.parser = HTMLParser(user_agent=user_agent, google_news_config=google_news_config)
-            else:
-                # User-Agentのみ更新
-                self.parser.user_agent = user_agent
         else:
-            # User-Agentを設定
-            self.parser.user_agent = user_agent
+            google_news_config_dict = config.get("google_news", {})
+            if google_news_config_dict:
+                google_news_config = GoogleNewsDecoderConfig.from_dict(google_news_config_dict)
+                # 設定が変更されている場合はパーサーを再作成
+                if google_news_config.decode_enabled != (self.google_news_config and self.google_news_config.decode_enabled):
+                    self.google_news_config = google_news_config
+                    self.parser = HTMLParser(user_agent=user_agent, google_news_config=google_news_config)
+                else:
+                    # User-Agentのみ更新
+                    self.parser.user_agent = user_agent
+            else:
+                # User-Agentを設定
+                self.parser.user_agent = user_agent
 
-        try:
-            # HTMLコンテンツを取得
-            html_content = self.parser.fetch_content(url)
+            try:
+                # HTMLコンテンツを取得
+                html_content = self.parser.fetch_content(url)
 
-            # メタデータを抽出
-            metadata = self.parser.parse_metadata(html_content, url)
+                # メタデータを抽出
+                metadata = self.parser.parse_metadata(html_content, url)
 
-            # 記事一覧を抽出
-            items = self.parser.extract_articles(html_content, url, max_items)
+                # 記事一覧を抽出
+                items = self.parser.extract_articles(html_content, url, max_items)
 
-            # RSSフィードを生成
-            feed = RSSFeed(
-                title=metadata["title"],
-                description=metadata["description"],
-                link=metadata["link"],
-                items=items,
-                last_build_date=datetime.now(),
-            )
+                # RSSフィードを生成
+                feed = RSSFeed(
+                    title=metadata["title"],
+                    description=metadata["description"],
+                    link=metadata["link"],
+                    items=items,
+                    last_build_date=datetime.now(),
+                )
 
-            return feed
+            except Exception as e:
+                if isinstance(e, FeedGenerationError):
+                    raise
+                raise FeedGenerationError(f"RSSフィード生成に失敗しました: {e}")
 
-        except Exception as e:
-            if isinstance(e, FeedGenerationError):
-                raise
-            raise FeedGenerationError(f"RSSフィード生成に失敗しました: {e}")
+        # 翻訳が有効な場合は翻訳を実行
+        if self.translation_enabled and self.translator and feed:
+            feed = self.translator.translate_feed(feed)
+
+        return feed
 
     def _generate_youtube_feed(self, url: str, max_items: int) -> RSSFeed:
         """YouTube検索URLからRSSフィードを生成.
