@@ -9,6 +9,8 @@ import click
 from ..core import FeedGenerator, URLGenerator
 from .config import ConfigManager
 from ..core.exceptions import FeedGenerationError, ParseError
+from ..core.translator import Translator
+from ..core.translation_cache import MemoryTranslationCache, RedisTranslationCache
 
 
 @click.command()
@@ -27,11 +29,15 @@ from ..core.exceptions import FeedGenerationError, ParseError
 @click.option("--google-news-cache-ttl", type=int, help="Google Newsキャッシュ有効期限（秒）")
 @click.option("--google-news-cache-type", type=click.Choice(['memory', 'redis']), help="Google Newsキャッシュタイプ")
 @click.option("--google-news-cache-size", type=int, help="Google Newsメモリキャッシュサイズ")
+@click.option("--translate", is_flag=True, help="翻訳を有効化")
+@click.option("--translation-api-key", help="Gemini API キー")
+@click.option("--translation-target-lang", default="ja", help="翻訳先言語")
 def cli(url: str, config: str | None, output: str | None,
         max_items: int | None, user_agent: str | None,
         use_feed: bool, feed_first: bool, generate_url: bool, api_host: str | None,
         decode_google_news: bool, google_news_interval: int | None, google_news_timeout: int | None,
-        google_news_cache_ttl: int | None, google_news_cache_type: str | None, google_news_cache_size: int | None) -> None:
+        google_news_cache_ttl: int | None, google_news_cache_type: str | None, google_news_cache_size: int | None,
+        translate: bool, translation_api_key: str | None, translation_target_lang: str) -> None:
     """指定されたURLからRSSフィードを生成またはWeb API URLを生成.
     
     Args:
@@ -184,13 +190,70 @@ def cli(url: str, config: str | None, output: str | None,
         if instagram_session_file == "":
             instagram_session_file = None
 
+        # 翻訳設定を処理
+        translation_enabled = False
+        translator = None
+
+        if translate:
+            translation_config = config_manager.get_translation_config(feed_config)
+
+            # コマンドライン引数でオーバーライド
+            if translation_api_key:
+                translation_config["api_key"] = translation_api_key
+            translation_config["target_lang"] = translation_target_lang
+
+            # API キーをチェック
+            api_key = translation_config.get("api_key") or os.getenv("GEMINI_API_KEY")
+            if not api_key:
+                click.echo(
+                    "エラー: Gemini API キーが指定されていません。\n"
+                    "--translation-api-key オプションを使用するか、環境変数 GEMINI_API_KEY を設定してください。",
+                    err=True
+                )
+                sys.exit(1)
+
+            # TranslationCacheを作成
+            translation_cache = None
+            if translation_config.get("cache_enabled", True):
+                cache_type = translation_config.get("cache_type", "memory")
+                if cache_type == "redis":
+                    try:
+                        translation_cache = RedisTranslationCache(
+                            redis_url=translation_config.get("redis_url", "redis://localhost:6379/0"),
+                            default_ttl=translation_config.get("cache_ttl", 86400)
+                        )
+                    except Exception as e:
+                        click.echo(f"警告: Redisキャッシュの初期化に失敗しました: {e}", err=True)
+                        click.echo("メモリキャッシュにフォールバックします。", err=True)
+                        translation_cache = MemoryTranslationCache(
+                            max_size=translation_config.get("cache_max_size", 1000),
+                            default_ttl=translation_config.get("cache_ttl", 86400)
+                        )
+                else:
+                    translation_cache = MemoryTranslationCache(
+                        max_size=translation_config.get("cache_max_size", 1000),
+                        default_ttl=translation_config.get("cache_ttl", 86400)
+                    )
+
+            # Translatorを作成
+            translator = Translator(
+                api_key=api_key,
+                model=translation_config.get("model", "gemini-1.5-flash"),
+                cache=translation_cache,
+                target_lang=translation_config.get("target_lang", "ja"),
+                source_lang=translation_config.get("source_lang", "auto")
+            )
+            translation_enabled = True
+
         generator = FeedGenerator(
             youtube_api_key=youtube_api_key,
             google_news_config=google_news_config,
             instagram_username=instagram_username,
             instagram_session_file=instagram_session_file,
             instagram_max_posts=instagram_max_posts,
-            use_instagram_full_client=use_instagram_full_client
+            use_instagram_full_client=use_instagram_full_client,
+            translation_enabled=translation_enabled,
+            translator=translator
         )
 
         # フィード検出を行う
