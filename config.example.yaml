@@ -39,3 +39,21 @@ instagram:
   username: ""                    # Instagram認証用ユーザー名
   session_file: ""                # セッションファイルのパス（絶対パスまたは相対パス）
   max_posts: 20                   # 最大投稿取得数（デフォルト: 20）
+
+# 翻訳設定
+# Google Gemini APIを使用して記事を日本語に翻訳します
+translation:
+  enabled: false                      # 翻訳機能の有効化（デフォルト: false）
+  api_key: null                       # Gemini API キー（環境変数 GEMINI_API_KEY での指定を推奨）
+  model: "gemini-1.5-flash"           # 使用するモデル（デフォルト: gemini-1.5-flash）
+  source_lang: "auto"                 # 翻訳元言語（auto=自動検出、デフォルト: auto）
+  target_lang: "ja"                   # 翻訳先言語（デフォルト: ja）
+
+  # キャッシュ設定
+  cache_enabled: true                 # キャッシュ有効化（デフォルト: true）
+  cache_type: "memory"                # キャッシュタイプ（memory/redis、デフォルト: memory）
+  cache_ttl: 86400                    # キャッシュ有効期限（秒、デフォルト: 86400=24時間）
+  cache_max_size: 1000                # メモリキャッシュ最大サイズ（デフォルト: 1000）
+
+  # Redis設定（cache_type: redisの場合のみ有効）
+  # redis_url: "redis://localhost:6379/0"  # Redis接続URL
