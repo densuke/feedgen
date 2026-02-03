@@ -70,13 +70,73 @@ user_agent: "custom-agent/1.0"
     def test_load_invalid_yaml_raises_error(self):
         """無効なYAMLファイルでエラーが発生する."""
         config_manager = ConfigManager()
-        
+
         with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
             f.write("invalid: yaml: content: [")
             config_file = f.name
-        
+
         try:
             with pytest.raises(Exception):  # YAML parse error
                 config_manager.load_config(config_file)
         finally:
             os.unlink(config_file)
+
+    def test_get_translation_config_default(self):
+        """デフォルトの翻訳設定が取得できる."""
+        config_manager = ConfigManager()
+        config = config_manager.get_default_config()
+
+        translation_config = config_manager.get_translation_config(config)
+
+        assert translation_config["enabled"] is False
+        assert translation_config["api_key"] is None
+        assert translation_config["model"] == "gemini-1.5-flash"
+        assert translation_config["source_lang"] == "auto"
+        assert translation_config["target_lang"] == "ja"
+        assert translation_config["cache_enabled"] is True
+        assert translation_config["cache_type"] == "memory"
+        assert translation_config["cache_ttl"] == 86400
+        assert translation_config["cache_max_size"] == 1000
+
+    def test_get_translation_config_custom(self):
+        """カスタム翻訳設定が取得できる."""
+        config_manager = ConfigManager()
+
+        config = {
+            "translation": {
+                "enabled": True,
+                "api_key": "test-key",
+                "model": "gemini-1.5-pro",
+                "target_lang": "ko",
+                "cache_ttl": 3600,
+            }
+        }
+
+        translation_config = config_manager.get_translation_config(config)
+
+        assert translation_config["enabled"] is True
+        assert translation_config["api_key"] == "test-key"
+        assert translation_config["model"] == "gemini-1.5-pro"
+        assert translation_config["target_lang"] == "ko"
+        assert translation_config["cache_ttl"] == 3600
+        # デフォルト値がマージされている
+        assert translation_config["source_lang"] == "auto"
+        assert translation_config["cache_enabled"] is True
+
+    def test_merge_configs_with_translation(self):
+        """翻訳設定を含むマージが正しく動作する."""
+        config_manager = ConfigManager()
+
+        base_config = config_manager.get_default_config()
+        override_config = {
+            "translation": {
+                "enabled": True,
+                "api_key": "override-key"
+            }
+        }
+
+        merged = config_manager.merge_configs(base_config, override_config)
+
+        assert "translation" in merged
+        assert merged["translation"]["enabled"] is True
+        assert merged["translation"]["api_key"] == "override-key"
