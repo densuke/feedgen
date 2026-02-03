@@ -12,7 +12,7 @@ class ConfigManager:
 
     def get_default_config(self) -> dict[str, Any]:
         """デフォルト設定を取得.
-        
+
         Returns:
             デフォルト設定の辞書
 
@@ -28,6 +28,17 @@ class ConfigManager:
                 "request_timeout": 10,
                 "max_retries": 3,
                 "enable_logging": True,
+            },
+            "translation": {
+                "enabled": False,
+                "api_key": None,
+                "model": "gemini-1.5-flash",
+                "source_lang": "auto",
+                "target_lang": "ja",
+                "cache_enabled": True,
+                "cache_type": "memory",
+                "cache_ttl": 86400,
+                "cache_max_size": 1000,
             },
         }
 
@@ -59,35 +70,60 @@ class ConfigManager:
 
     def merge_configs(self, base_config: dict[str, Any], override_config: dict[str, Any]) -> dict[str, Any]:
         """設定をマージ.
-        
+
         Args:
             base_config: ベース設定
             override_config: オーバーライド設定
-            
+
         Returns:
             マージされた設定
 
         """
         merged = base_config.copy()
-        
+
         # 通常の設定項目をマージ
         for key, value in override_config.items():
-            if key == "google_news" and isinstance(value, dict) and key in merged:
-                # google_news設定は深いマージを行う
+            if key in ("google_news", "translation") and isinstance(value, dict) and key in merged:
+                # google_news/translation設定は深いマージを行う
                 merged[key] = {**merged[key], **value}
             else:
                 merged[key] = value
-                
+
         return merged
 
     def get_google_news_config(self, config: dict[str, Any]) -> GoogleNewsDecoderConfig:
         """Google News デコーダー設定を取得.
-        
+
         Args:
             config: 全体設定
-            
+
         Returns:
             Google News デコーダー設定
         """
         google_news_config = config.get("google_news", {})
         return GoogleNewsDecoderConfig.from_dict(google_news_config)
+
+    def get_translation_config(self, config: dict[str, Any]) -> dict[str, Any]:
+        """翻訳設定を取得.
+
+        Args:
+            config: 全体設定
+
+        Returns:
+            翻訳設定辞書
+        """
+        default_translation_config = {
+            "enabled": False,
+            "api_key": None,
+            "model": "gemini-1.5-flash",
+            "source_lang": "auto",
+            "target_lang": "ja",
+            "cache_enabled": True,
+            "cache_type": "memory",
+            "cache_ttl": 86400,
+            "cache_max_size": 1000,
+        }
+
+        # 設定から翻訳セクションを取得し、デフォルトとマージ
+        translation_config = config.get("translation", {})
+        return {**default_translation_config, **translation_config}
