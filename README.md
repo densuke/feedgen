@@ -12,6 +12,7 @@ URLの内容を分析してRSSフィードを生成するツール。
 - Instagram プロフィールページ対応
   - 軽量版: 認証不要でプロフィール情報取得
   - フル機能版: 認証ありで投稿詳細取得（instaloader使用）
+- Gemini APIによる翻訳機能（タイトル・説明の日本語化、キャッシュ対応）
 - コマンドライン及び設定ファイルによる設定
 - ライブラリとしても使用可能
 
@@ -67,6 +68,16 @@ feedgen --decode-google-news --google-news-cache-type redis https://news.google.
 
 # Instagram プロフィールページ
 feedgen https://www.instagram.com/username/
+
+# 翻訳機能（Gemini API使用）
+feedgen --translate --translation-api-key YOUR_API_KEY https://example.com
+
+# 翻訳先言語指定
+feedgen --translate --translation-api-key YOUR_API_KEY --translation-target-lang ko https://example.com
+
+# 環境変数でAPI key指定
+export GEMINI_API_KEY=YOUR_API_KEY
+feedgen --translate https://example.com
 ```
 
 ### Instagram対応について
@@ -115,6 +126,99 @@ instagram:
 
 ```
 
+### 翻訳機能について
+
+Google Gemini APIを使用して記事のタイトルと説明を日本語に翻訳できます。
+
+#### 設定方法
+
+**環境変数で設定**（推奨）:
+```bash
+export GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
+```
+
+**設定ファイルで設定** (`config.yaml`):
+```yaml
+translation:
+  enabled: true
+  api_key: "YOUR_GEMINI_API_KEY"
+  model: "gemini-1.5-flash"
+  target_lang: "ja"
+  cache_enabled: true
+  cache_type: "memory"
+  cache_ttl: 86400
+```
+
+#### CLI使用例
+
+```bash
+# 環境変数でAPI keyを設定
+export GEMINI_API_KEY="YOUR_API_KEY"
+feedgen --translate https://example.com
+
+# コマンドラインでAPI key指定
+feedgen --translate --translation-api-key YOUR_API_KEY https://example.com
+
+# 翻訳先言語を指定（デフォルト: ja）
+feedgen --translate --translation-target-lang ko https://example.com
+```
+
+#### API使用例
+
+```bash
+# 翻訳機能有効化
+curl "http://localhost:8000/feed?url=https://example.com&translate=true&translation_api_key=YOUR_KEY"
+
+# 翻訳先言語指定
+curl "http://localhost:8000/feed?url=https://example.com&translate=true&translation_api_key=YOUR_KEY&translation_target_lang=ko"
+```
+
+#### ライブラリとして使用
+
+```python
+from feedgen.core import FeedGenerator
+from feedgen.core.translator import Translator
+from feedgen.core.translation_cache import MemoryTranslationCache
+
+# Translatorの作成
+cache = MemoryTranslationCache(max_size=1000, default_ttl=86400)
+translator = Translator(
+    api_key="YOUR_GEMINI_API_KEY",
+    model="gemini-1.5-flash",
+    cache=cache,
+    target_lang="ja"
+)
+
+# FeedGeneratorで翻訳を有効化
+generator = FeedGenerator(
+    translation_enabled=True,
+    translator=translator
+)
+
+feed = generator.generate_feed("https://example.com")
+print(feed.to_xml())
+```
+
+#### キャッシュ機能
+
+翻訳結果はキャッシュされ、同じテキストの翻訳をスキップできます。
+
+**メリット**:
+- **コスト削減**: API呼び出し回数の削減
+- **高速化**: キャッシュヒット時の即座な応答
+- **効率化**: 同一記事の重複翻訳を回避
+
+**キャッシュタイプ**:
+1. **メモリキャッシュ（memory）**: プロセス内のメモリに保存（デフォルト）
+2. **Redisキャッシュ（redis）**: 外部Redisサーバーに保存（プロセス間で共有）
+
+#### 注意事項
+
+- Google Gemini API keyが必要です（https://ai.google.dev/ で取得）
+- 翻訳に失敗した場合は元のテキストがそのまま使用されます
+- キャッシュはデフォルトで有効ですが、設定で無効化可能です
+- `google-generativeai` パッケージが必要です
+
 ### Webサービス
 
 ```bash
@@ -141,6 +245,12 @@ curl "http://localhost:8000/feed?url=https://news.google.com/topics/CAAqBwgKMKHL
 
 # キャッシュ機能付き
 curl "http://localhost:8000/feed?url=https://news.google.com/topics/CAAqBwgKMKHL9QowkqbaAg&decode_google_news=true&google_news_cache_ttl=7200&google_news_cache_type=memory"
+
+# 翻訳機能
+curl "http://localhost:8000/feed?url=https://example.com&translate=true&translation_api_key=YOUR_KEY"
+
+# 翻訳 + Google Newsデコード
+curl "http://localhost:8000/feed?url=https://news.google.com/topics/CAAqBwgKMKHL9QowkqbaAg&decode_google_news=true&translate=true&translation_api_key=YOUR_KEY"
 ```
 
 #### API仕様書
@@ -241,7 +351,7 @@ google_news:
   request_timeout: 10             # タイムアウト（秒、デフォルト: 10）
   max_retries: 3                  # 最大リトライ回数（デフォルト: 3）
   enable_logging: true            # デコードログ出力（デフォルト: true）
-  
+
   # キャッシュ設定（コスト削減と高速化のため）
   cache_enabled: true             # キャッシュ機能有効化（デフォルト: true）
   cache_type: memory              # キャッシュタイプ（memory/redis、デフォルト: memory）
@@ -249,6 +359,21 @@ google_news:
   cache_max_size: 1000            # メモリキャッシュ最大サイズ（デフォルト: 1000）
   redis_url: redis://localhost:6379/0  # Redis接続URL（Redisタイプ時のみ）
   redis_key_prefix: "feedgen:gnews:"   # Redisキープレフィックス（デフォルト）
+
+# 翻訳設定
+translation:
+  enabled: false                  # 翻訳機能の有効化（デフォルト: false）
+  api_key: "YOUR_GEMINI_API_KEY"  # Gemini API キー（環境変数GEMINI_API_KEY推奨）
+  model: "gemini-1.5-flash"       # 使用するモデル（デフォルト: gemini-1.5-flash）
+  source_lang: "auto"             # 翻訳元言語（auto=自動検出）
+  target_lang: "ja"               # 翻訳先言語（デフォルト: ja）
+
+  # キャッシュ設定
+  cache_enabled: true             # キャッシュ有効化（デフォルト: true）
+  cache_type: "memory"            # memory または redis（デフォルト: memory）
+  cache_ttl: 86400                # キャッシュ有効期限（秒、デフォルト: 24時間）
+  cache_max_size: 1000            # メモリキャッシュ最大サイズ（デフォルト: 1000）
+  redis_url: "redis://localhost:6379/0"  # Redis接続URL（Redisタイプ時のみ）
 ```
 
 ### URL生成機能
