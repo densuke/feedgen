@@ -4,7 +4,6 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 from feedgen.core.translation_cache import (
-    TranslationCache,
     MemoryTranslationCache,
     RedisTranslationCache,
 )

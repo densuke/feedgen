@@ -1,13 +1,11 @@
 """キャッシュ機能のテスト."""
 
-import time
 from unittest.mock import Mock, patch
 
 from feedgen.core.cache import (
     MemoryURLDecodeCache,
     RedisURLDecodeCache,
     CacheConfig,
-    URLDecodeCache,
 )
 
 
@@ -66,9 +64,7 @@ class TestMemoryURLDecodeCache:
     def test_cache_stats(self):
         """キャッシュ統計情報をテスト."""
         google_news_url1 = "https://news.google.com/articles/CBMi123"
-        google_news_url2 = "https://news.google.com/articles/CBMi456"
         decoded_url1 = "https://example.com/article/123"
-        decoded_url2 = "https://example.com/article/456"
 
         # 初期統計
         stats = self.cache.get_stats()

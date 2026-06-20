@@ -1,7 +1,7 @@
 """Web API テスト."""
 
 from fastapi.testclient import TestClient
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 from feedgen.api.main import app
 from feedgen.core.models import RSSFeed, RSSItem

@@ -2,10 +2,9 @@
 
 import hashlib
 import logging
-import time
 from abc import ABC, abstractmethod
-from typing import Optional, Union
-from urllib.parse import urlparse, unquote
+from typing import Optional
+from urllib.parse import urlparse
 
 try:
     import redis

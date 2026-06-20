@@ -203,7 +203,7 @@ class InstagramClient:
                 # metaタグからデータを取得
                 title = self._extract_meta_content(soup, "og:title") or "Instagram Profile"
                 description = self._extract_meta_content(soup, "og:description") or ""
-                image = self._extract_meta_content(soup, "og:image")
+                self._extract_meta_content(soup, "og:image")
 
                 # プロフィール情報をパース
                 profile_info = self._parse_profile_description(description)
@@ -246,7 +246,7 @@ class InstagramClient:
                         continue
                     else:
                         error_msg = (
-                            f"Instagramレート制限: 最大リトライ回数に達しました。"
+                            "Instagramレート制限: 最大リトライ回数に達しました。"
                             "しばらく待ってから再度アクセスするか、InstagramFullClientの使用を検討してください。"
                         )
                         logger.error(error_msg)
