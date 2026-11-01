@@ -7,6 +7,7 @@ from bs4 import BeautifulSoup
 
 from .exceptions import FeedGenerationError, ParseError
 from .models import RSSItem
+from .safe_fetch import safe_request
 from .url_normalizers import URLNormalizerRegistry
 from .google_news_decoder import GoogleNewsDecoderConfig
 
@@ -46,7 +47,7 @@ class HTMLParser:
         """
         try:
             headers = {"User-Agent": self.user_agent}
-            response = requests.get(url, headers=headers, timeout=30)
+            response = safe_request("get", url, headers=headers, timeout=30)
             response.raise_for_status()
             return response.text
         except requests.RequestException as e:

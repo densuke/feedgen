@@ -5,7 +5,8 @@ from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
 
-from .exceptions import FeedGenerationError
+from .exceptions import FeedGenerationError, UnsafeURLError
+from .safe_fetch import safe_request
 
 
 class FeedDetector:
@@ -75,7 +76,7 @@ class FeedDetector:
         """
         try:
             headers = {"User-Agent": self.user_agent}
-            response = requests.get(feed_url, headers=headers, timeout=30)
+            response = safe_request("get", feed_url, headers=headers, timeout=30)
             response.raise_for_status()
 
             content_type = response.headers.get("content-type", "application/xml")
@@ -90,7 +91,7 @@ class FeedDetector:
 
         try:
             headers = {"User-Agent": self.user_agent}
-            response = requests.get(url, headers=headers, timeout=30)
+            response = safe_request("get", url, headers=headers, timeout=30)
             response.raise_for_status()
 
             soup = BeautifulSoup(response.text, "html.parser")
@@ -169,7 +170,7 @@ class FeedDetector:
         """フィードURLが存在するかチェック."""
         try:
             headers = {"User-Agent": self.user_agent}
-            response = requests.head(feed_url, headers=headers, timeout=10, allow_redirects=True)
+            response = safe_request("head", feed_url, headers=headers, timeout=10)
 
             # 200番台またはフィード形式のContent-Type
             if response.status_code < 400:
@@ -178,7 +179,7 @@ class FeedDetector:
 
             return False
 
-        except requests.RequestException:
+        except (requests.RequestException, UnsafeURLError):
             return False
 
     def _guess_feed_type_from_path(self, path: str) -> str:

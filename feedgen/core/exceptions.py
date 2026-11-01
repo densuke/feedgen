@@ -42,3 +42,8 @@ class InstagramAuthError(FeedGenerationError):
 class InstagramRateLimitError(FeedGenerationError):
     """Instagramレート制限エラー."""
     pass
+
+
+class UnsafeURLError(FeedGenerationError):
+    """取得を許可しないURL(内部アドレス・非http(s)など)."""
+    pass
