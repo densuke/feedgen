@@ -1,5 +1,7 @@
 """Web API for RSS feed generation."""
 
+import logging
+import re
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
@@ -9,6 +11,16 @@ from fastapi.responses import Response
 from ..core import FeedGenerator
 from ..cli.config import ConfigManager
 from ..core.exceptions import FeedGenerationError, ParseError, InstagramAuthError, InstagramRateLimitError
+
+logger = logging.getLogger(__name__)
+
+_SECRET_PARAM = re.compile(r"(?i)\b(key|token|api_key|apikey|access_token)=[^&\s'\">)]+")
+
+
+def _redact(text: str) -> str:
+    """例外文に含まれる API キー等のクエリ値を伏せる."""
+    return _SECRET_PARAM.sub(r"\1=<redacted>", text)
+
 
 app = FastAPI(
     title="feedgen API",
@@ -43,7 +55,7 @@ async def root():
 
 
 @app.get("/feed")
-async def generate_feed(
+def generate_feed(
     url: str = Query(..., description="分析対象のURL"),
     max_items: Optional[int] = Query(20, description="最大記事数", ge=1, le=100),
     use_feed: Optional[bool] = Query(False, description="既存フィード代理取得"),
@@ -184,7 +196,7 @@ async def generate_feed(
             status_code=401,
             detail={
                 "error": "Instagram認証エラー",
-                "message": str(e),
+                "message": _redact(str(e)),
                 "recommendation": "InstagramFullClientの設定を検討してください。詳細はREADME.mdを参照。"
             }
         )
@@ -193,14 +205,15 @@ async def generate_feed(
             status_code=429,
             detail={
                 "error": "Instagramレート制限",
-                "message": str(e),
+                "message": _redact(str(e)),
                 "recommendation": "しばらく待ってから再度アクセスするか、InstagramFullClientの設定を検討してください。"
             }
         )
     except (FeedGenerationError, ParseError) as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        raise HTTPException(status_code=400, detail=_redact(str(e)))
+    except Exception:
+        logger.exception("feed generation failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.get("/health")

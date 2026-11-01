@@ -140,24 +140,30 @@ class TestEnsurePublicUrlHostname:
 class TestSafeRequest:
     def test_returns_response_for_public_url(self, dns):
         dns["example.com"] = [PUBLIC_IP]
-        with patch("feedgen.core.safe_fetch.requests.get", return_value=_resp()) as get:
+        with patch("feedgen.core.safe_fetch._http_get", return_value=_resp()) as get:
             response = safe_fetch.safe_request("get", "https://example.com/", timeout=5)
         assert response.status_code == 200
         _, kwargs = get.call_args
-        assert kwargs["allow_redirects"] is False
+        assert "allow_redirects" not in kwargs
         assert kwargs["timeout"] == 5
 
+    def test_applies_default_timeout(self, dns):
+        dns["example.com"] = [PUBLIC_IP]
+        with patch("feedgen.core.safe_fetch._http_get", return_value=_resp()) as get:
+            safe_fetch.safe_request("get", "https://example.com/")
+        assert get.call_args.kwargs["timeout"] == safe_fetch.DEFAULT_TIMEOUT
+
     def test_does_not_call_network_for_private_url(self):
-        with patch("feedgen.core.safe_fetch.requests.get") as get:
+        with patch("feedgen.core.safe_fetch._http_get") as get:
             with pytest.raises(UnsafeURLError):
                 safe_fetch.safe_request("get", "http://127.0.0.1:9998/")
         get.assert_not_called()
 
     def test_ignores_caller_allow_redirects(self, dns):
         dns["example.com"] = [PUBLIC_IP]
-        with patch("feedgen.core.safe_fetch.requests.head", return_value=_resp()) as head:
+        with patch("feedgen.core.safe_fetch._http_head", return_value=_resp()) as head:
             safe_fetch.safe_request("head", "https://example.com/", allow_redirects=True)
-        assert head.call_args.kwargs["allow_redirects"] is False
+        assert "allow_redirects" not in head.call_args.kwargs
 
     def test_rejects_unknown_method(self):
         with pytest.raises(ValueError):
@@ -167,7 +173,7 @@ class TestSafeRequest:
         dns["a.example"] = [PUBLIC_IP]
         dns["b.example"] = [PUBLIC_IP]
         responses = [_resp(302, "https://b.example/feed"), _resp(200, text="final")]
-        with patch("feedgen.core.safe_fetch.requests.get", side_effect=responses) as get:
+        with patch("feedgen.core.safe_fetch._http_get", side_effect=responses) as get:
             response = safe_fetch.safe_request("get", "https://a.example/")
         assert response.text == "final"
         assert get.call_args_list[1].args[0] == "https://b.example/feed"
@@ -175,7 +181,7 @@ class TestSafeRequest:
     def test_resolves_relative_redirect(self, dns):
         dns["a.example"] = [PUBLIC_IP]
         responses = [_resp(301, "/new"), _resp(200)]
-        with patch("feedgen.core.safe_fetch.requests.get", side_effect=responses) as get:
+        with patch("feedgen.core.safe_fetch._http_get", side_effect=responses) as get:
             safe_fetch.safe_request("get", "https://a.example/old")
         assert get.call_args_list[1].args[0] == "https://a.example/new"
 
@@ -190,7 +196,7 @@ class TestSafeRequest:
     )
     def test_rejects_redirect_to_non_public(self, dns, target):
         dns["a.example"] = [PUBLIC_IP]
-        with patch("feedgen.core.safe_fetch.requests.get", return_value=_resp(302, target)) as get:
+        with patch("feedgen.core.safe_fetch._http_get", return_value=_resp(302, target)) as get:
             with pytest.raises(UnsafeURLError):
                 safe_fetch.safe_request("get", "https://a.example/")
         assert get.call_count == 1
@@ -199,7 +205,7 @@ class TestSafeRequest:
         dns["a.example"] = [PUBLIC_IP]
         dns["internal.example"] = ["10.0.0.5"]
         with patch(
-            "feedgen.core.safe_fetch.requests.get",
+            "feedgen.core.safe_fetch._http_get",
             return_value=_resp(302, "https://internal.example/"),
         ):
             with pytest.raises(UnsafeURLError):
@@ -208,7 +214,7 @@ class TestSafeRequest:
     def test_rejects_too_many_redirects(self, dns):
         dns["a.example"] = [PUBLIC_IP]
         with patch(
-            "feedgen.core.safe_fetch.requests.get",
+            "feedgen.core.safe_fetch._http_get",
             return_value=_resp(302, "https://a.example/loop"),
         ) as get:
             with pytest.raises(UnsafeURLError):
@@ -217,7 +223,7 @@ class TestSafeRequest:
 
     def test_redirect_without_location_is_returned_as_is(self, dns):
         dns["a.example"] = [PUBLIC_IP]
-        with patch("feedgen.core.safe_fetch.requests.get", return_value=_resp(302)):
+        with patch("feedgen.core.safe_fetch._http_get", return_value=_resp(302)):
             response = safe_fetch.safe_request("get", "https://a.example/")
         assert response.status_code == 302
 
@@ -226,19 +232,19 @@ class TestIntegrationWithFetchers:
     """取得を行う各クラスが safe_fetch を経由することを確認する."""
 
     def test_html_parser_rejects_private_url(self):
-        with patch("feedgen.core.safe_fetch.requests.get") as get:
+        with patch("feedgen.core.safe_fetch._http_get") as get:
             with pytest.raises(UnsafeURLError):
                 HTMLParser().fetch_content("http://127.0.0.1:9998/")
         get.assert_not_called()
 
     def test_feed_detector_fetch_feed_rejects_private_url(self):
-        with patch("feedgen.core.safe_fetch.requests.get") as get:
+        with patch("feedgen.core.safe_fetch._http_get") as get:
             with pytest.raises(UnsafeURLError):
                 FeedDetector().fetch_feed("http://169.254.169.254/feed")
         get.assert_not_called()
 
     def test_feed_detector_detect_rejects_private_url(self):
-        with patch("feedgen.core.safe_fetch.requests.get") as get:
+        with patch("feedgen.core.safe_fetch._http_get") as get:
             with pytest.raises(FeedGenerationError):
                 FeedDetector().detect_feeds("http://10.0.0.1/")
         get.assert_not_called()
@@ -246,7 +252,7 @@ class TestIntegrationWithFetchers:
     def test_check_feed_exists_treats_unsafe_redirect_as_missing(self, dns):
         dns["a.example"] = [PUBLIC_IP]
         with patch(
-            "feedgen.core.safe_fetch.requests.head",
+            "feedgen.core.safe_fetch._http_head",
             return_value=_resp(302, "http://127.0.0.1:9998/"),
         ):
             assert FeedDetector()._check_feed_exists("https://a.example/feed") is False
