@@ -7,14 +7,17 @@
   バックスラッシュ・制御文字・空白・userinfo を含むURLはパーサ間で解釈が割れるため拒否する
 - http/https 以外は拒否する。名前解決したアドレスが1つでも公開でなければ拒否する
 - リダイレクトは自動で追わず、遷移先ごとに同じ検査をかける
-- 接続した直後に実際の接続先アドレスを検査する(検査後に名前解決が変わる DNS
-  リバインディングを、リクエストを送る前に止める)
-- 応答本文は MAX_BYTES まで。環境変数のプロキシ設定は読まない
+- TCP 接続の直後(TLS ハンドシェイクの前)に実際の接続先アドレスを検査する(検査後に
+  名前解決が変わる DNS リバインディングを、何も送る前に止める)
+- 応答本文は圧縮の前後とも MAX_BYTES まで。展開は上限つきで行う(圧縮爆弾の対策)。
+  本文の読み取りには全体の締切を設ける。環境変数のプロキシ設定は読まない
 """
 
 import ipaddress
 import re
 import socket
+import time
+import zlib
 from urllib.parse import urljoin, urlparse
 
 import requests
@@ -28,6 +31,7 @@ from .exceptions import UnsafeURLError
 MAX_REDIRECTS = 5
 MAX_BYTES = 2 * 1024 * 1024
 DEFAULT_TIMEOUT = 30
+TOTAL_TIMEOUT = 45
 
 _DENIED = "このアドレスへのアクセスは許可されていません"
 _ALLOWED_SCHEMES = {"http", "https"}
@@ -38,6 +42,8 @@ _NON_PUBLIC_V6 = [
     ipaddress.ip_network("::/96"),
     ipaddress.ip_network("64:ff9b::/96"),
     ipaddress.ip_network("64:ff9b:1::/48"),
+    ipaddress.ip_network("::ffff:0:0:0/96"),
+    ipaddress.ip_network("fec0::/10"),
 ]
 
 
@@ -126,15 +132,17 @@ def _verify_peer(sock) -> None:
 
 
 class _GuardedHTTPConnection(HTTPConnection):
-    def connect(self):
-        super().connect()
-        _verify_peer(self.sock)
+    def _new_conn(self):
+        sock = super()._new_conn()
+        _verify_peer(sock)
+        return sock
 
 
 class _GuardedHTTPSConnection(HTTPSConnection):
-    def connect(self):
-        super().connect()
-        _verify_peer(self.sock)
+    def _new_conn(self):
+        sock = super()._new_conn()
+        _verify_peer(sock)
+        return sock
 
 
 class _GuardedHTTPPool(HTTPConnectionPool):
@@ -157,34 +165,84 @@ class _GuardedAdapter(HTTPAdapter):
 def _new_session() -> requests.Session:
     session = requests.Session()
     session.trust_env = False
+    session.headers["Accept-Encoding"] = "identity"
     adapter = _GuardedAdapter()
     session.mount("http://", adapter)
     session.mount("https://", adapter)
     return session
 
 
-def _read_limited(response: requests.Response) -> None:
-    """本文を MAX_BYTES まで読み込む(圧縮は展開後の大きさで数える)."""
+def _decode_limited(data: bytes, encoding: str) -> bytes:
+    """圧縮された本文を、展開後も MAX_BYTES を超えない範囲でだけ展開する."""
+    if encoding in ("", "identity"):
+        return data
+    if encoding not in ("gzip", "x-gzip", "deflate"):
+        raise UnsafeURLError("未対応の圧縮形式です")
+    last_error: Exception | None = None
+    for wbits in (47, -15) if encoding == "deflate" else (47,):
+        decoder = zlib.decompressobj(wbits)
+        try:
+            out = decoder.decompress(data, MAX_BYTES + 1)
+            if len(out) > MAX_BYTES or decoder.unconsumed_tail:
+                raise UnsafeURLError("応答が大きすぎます")
+            out += decoder.flush()
+        except zlib.error as e:
+            last_error = e
+            continue
+        if len(out) > MAX_BYTES:
+            raise UnsafeURLError("応答が大きすぎます")
+        return out
+    raise UnsafeURLError("応答を展開できません") from last_error
+
+
+def _read_limited(response: requests.Response, budget: float) -> None:
+    """本文を MAX_BYTES まで、budget 秒以内に読み込む."""
     declared = response.headers.get("Content-Length", "")
-    if declared.isdigit() and int(declared) > MAX_BYTES:
+    if declared.isascii() and declared.isdigit() and int(declared) > MAX_BYTES:
         response.close()
         raise UnsafeURLError("応答が大きすぎます")
+    deadline = time.monotonic() + budget
     chunks: list[bytes] = []
     size = 0
-    for chunk in response.iter_content(chunk_size=65536):
+    while True:
+        if time.monotonic() > deadline:
+            response.close()
+            raise UnsafeURLError("応答に時間がかかりすぎています")
+        chunk = response.raw.read1(65536, decode_content=False)
+        if not chunk:
+            break
         size += len(chunk)
         if size > MAX_BYTES:
             response.close()
             raise UnsafeURLError("応答が大きすぎます")
         chunks.append(chunk)
-    response._content = b"".join(chunks)
+    encoding = response.headers.get("Content-Encoding", "").strip().lower()
+    try:
+        response._content = _decode_limited(b"".join(chunks), encoding)
+    finally:
+        response.close()
+
+
+def _budget(timeout) -> float:
+    """requests の timeout(数値または組)から、本文読み取りの持ち時間を決める."""
+    if isinstance(timeout, tuple):
+        return float(max(t for t in timeout if t is not None))
+    return float(timeout)
+
+
+def _clamp(timeout, remaining: float):
+    """timeout を、全体の残り時間を超えない値にする."""
+    if isinstance(timeout, tuple):
+        return tuple(None if t is None else min(t, remaining) for t in timeout)
+    return min(timeout, remaining)
 
 
 def _fetch(method: str, url: str, **kwargs) -> requests.Response:
+    timeout = kwargs.setdefault("timeout", DEFAULT_TIMEOUT)
     with _new_session() as session:
         response = session.request(method, url, allow_redirects=False, stream=True, **kwargs)
         if method == "GET" and response.status_code not in _REDIRECT_STATUS:
-            _read_limited(response)
+            _read_limited(response, _budget(timeout))
         else:
             response.close()
         return response
@@ -203,12 +261,16 @@ def safe_request(method: str, url: str, **kwargs) -> requests.Response:
     if method not in _METHODS:
         raise ValueError(f"未対応のメソッドです: {method}")
     kwargs.pop("allow_redirects", None)
-    kwargs.setdefault("timeout", DEFAULT_TIMEOUT)
+    timeout = kwargs.pop("timeout", DEFAULT_TIMEOUT)
+    deadline = time.monotonic() + TOTAL_TIMEOUT
     current = url
     for _ in range(MAX_REDIRECTS + 1):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise UnsafeURLError("応答に時間がかかりすぎています")
         ensure_public_url(current)
         send = {"get": _http_get, "head": _http_head}[method]
-        response = send(current, **kwargs)
+        response = send(current, timeout=_clamp(timeout, remaining), **kwargs)
         location = response.headers.get("Location")
         if response.status_code not in _REDIRECT_STATUS or not location:
             return response

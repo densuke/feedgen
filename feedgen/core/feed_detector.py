@@ -1,5 +1,6 @@
 """既存フィード検出・取得機能."""
 
+import logging
 from urllib.parse import urljoin, urlparse
 
 import requests
@@ -7,6 +8,8 @@ from bs4 import BeautifulSoup
 
 from .exceptions import FeedGenerationError, UnsafeURLError
 from .safe_fetch import safe_request
+
+logger = logging.getLogger(__name__)
 
 
 class FeedDetector:
@@ -83,7 +86,8 @@ class FeedDetector:
             return response.text, content_type
 
         except requests.RequestException as e:
-            raise FeedGenerationError(f"フィード取得に失敗しました: {e}")
+            logger.warning("fetch_feed failed: %s", e)
+            raise FeedGenerationError("フィード取得に失敗しました")
 
     def _detect_from_html(self, url: str) -> list[dict[str, str]]:
         """HTMLのlinkタグからフィードを検出."""

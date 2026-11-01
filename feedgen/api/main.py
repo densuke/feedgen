@@ -14,12 +14,14 @@ from ..core.exceptions import FeedGenerationError, ParseError, InstagramAuthErro
 
 logger = logging.getLogger(__name__)
 
-_SECRET_PARAM = re.compile(r"(?i)\b(key|token|api_key|apikey|access_token)=[^&\s'\">)]+")
+_SECRET_PARAM = re.compile(
+    r"(?i)([\w.-]*(?:key|token|secret|password|passwd|signature))(=|%3d)[^&\s'\">)]+"
+)
 
 
 def _redact(text: str) -> str:
-    """例外文に含まれる API キー等のクエリ値を伏せる."""
-    return _SECRET_PARAM.sub(r"\1=<redacted>", text)
+    """例外文に含まれる API キー等のクエリ値を伏せる(名前に key/token/secret 等を含むもの)."""
+    return _SECRET_PARAM.sub(r"\1\2<redacted>", text)
 
 
 app = FastAPI(
