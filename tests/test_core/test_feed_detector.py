@@ -20,7 +20,7 @@ class TestFeedDetector:
         detector = FeedDetector(user_agent="test-agent/2.0")
         assert detector.user_agent == "test-agent/2.0"
 
-    @patch('feedgen.core.feed_detector.requests.get')
+    @patch('feedgen.core.safe_fetch._http_get')
     def test_detect_from_html_rss_link(self, mock_get):
         """HTMLのRSSリンクタグからフィードを検出できる."""
         mock_response = Mock()
@@ -42,7 +42,7 @@ class TestFeedDetector:
         assert feeds[0]['title'] == "RSS Feed"
         assert feeds[0]['type'] == "RSS"
 
-    @patch('feedgen.core.feed_detector.requests.get')
+    @patch('feedgen.core.safe_fetch._http_get')
     def test_detect_from_html_atom_link(self, mock_get):
         """HTMLのAtomリンクタグからフィードを検出できる."""
         mock_response = Mock()
@@ -64,8 +64,8 @@ class TestFeedDetector:
         assert feeds[0]['title'] == "Atom Feed"
         assert feeds[0]['type'] == "Atom"
 
-    @patch('feedgen.core.feed_detector.requests.head')
-    @patch('feedgen.core.feed_detector.requests.get')
+    @patch('feedgen.core.safe_fetch._http_head')
+    @patch('feedgen.core.safe_fetch._http_get')
     def test_detect_from_common_paths(self, mock_get, mock_head):
         """一般的なフィードパスから検出できる."""
         # HTMLからは何も見つからない
@@ -114,7 +114,7 @@ class TestFeedDetector:
         assert detector._get_base_url("https://example.com/path/to/page") == "https://example.com"
         assert detector._get_base_url("http://test.org/feed") == "http://test.org"
 
-    @patch('feedgen.core.feed_detector.requests.head')
+    @patch('feedgen.core.safe_fetch._http_head')
     def test_check_feed_exists_true(self, mock_head):
         """フィードが存在する場合の確認."""
         mock_response = Mock()
@@ -127,7 +127,7 @@ class TestFeedDetector:
         
         assert result
 
-    @patch('feedgen.core.feed_detector.requests.head')
+    @patch('feedgen.core.safe_fetch._http_head')
     def test_check_feed_exists_false(self, mock_head):
         """フィードが存在しない場合の確認."""
         mock_response = Mock()
@@ -148,7 +148,7 @@ class TestFeedDetector:
         assert detector._guess_feed_type_from_path("/rss") == "RSS"
         assert detector._guess_feed_type_from_path("/feed") == "RSS"
 
-    @patch('feedgen.core.feed_detector.requests.get')
+    @patch('feedgen.core.safe_fetch._http_get')
     def test_fetch_feed_success(self, mock_get):
         """フィード取得の成功."""
         mock_response = Mock()
@@ -163,7 +163,7 @@ class TestFeedDetector:
         assert '<?xml version="1.0"?>' in content
         assert content_type == 'application/rss+xml'
 
-    @patch('feedgen.core.feed_detector.requests.get')
+    @patch('feedgen.core.safe_fetch._http_get')
     def test_fetch_feed_failure(self, mock_get):
         """フィード取得の失敗."""
         import requests
