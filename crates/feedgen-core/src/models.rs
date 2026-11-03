@@ -34,11 +34,12 @@ impl RssFeed {
     ///
     /// `now` は、日付を持つ記事がないときの `lastBuildDate` に使う現在時刻 (M-8)。
     pub fn to_xml(&self, now: DateTime<FixedOffset>) -> String {
+        // 同じ時刻なら先に出た値を残す。`max()` は最後を返すので使わない (M-8)。
         let last_build = self
             .items
             .iter()
             .filter_map(|item| item.pub_date)
-            .max()
+            .reduce(|latest, date| if date > latest { date } else { latest })
             .unwrap_or(now);
 
         let mut xml = String::from(XML_HEAD);
