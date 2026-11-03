@@ -192,6 +192,65 @@ fn known_difference_unclosed_paragraphs_are_not_nested() {
     );
 }
 
+#[test]
+fn known_difference_crlf_is_normalized_to_lf() {
+    // Python 版は "\r" を残し、タイトルの末尾に "\r" が付く。HTML5 の入力処理は "\r\n" と "\r" を "\n" にする。
+    let crlf =
+        "<div>first line of block text that is long\r\nsecond line <a href=\"/x\">x</a></div>";
+    let items = run(crlf).1;
+    assert_eq!(items[0].title, "first line of block text that is long");
+    assert_eq!(
+        items[0].description,
+        "first line of block text that is long\nsecond line x"
+    );
+
+    // 単独の "\r" も改行になり、行が分かれる (Python 版は 1 行のまま)
+    let cr = "<div>first line of block text that is long\rsecond line <a href=\"/x\">x</a></div>";
+    assert_eq!(run(cr).1[0].title, "first line of block text that is long");
+}
+
+#[test]
+fn known_difference_newline_right_after_pre_and_textarea_start_tags_is_dropped() {
+    // Python 版は残す ("head\nbody1…" と "\n\nxyz")。HTML5 の規則では開始タグ直後の 1 つの改行を捨てる。
+    let html = r#"<h2><a href="/a">H</a></h2><div>head<pre>
+body1
+body2</pre>tail<textarea>
+
+xyz</textarea>end</div>"#;
+    assert_eq!(run(html).1[0].description, "headbody1\nbody2tail\nxyzend");
+}
+
+// ---- 空白だけのテキストのまとめ方 (2.3) ----
+
+#[test]
+fn whitespace_only_text_is_collapsed_except_inside_pre_and_textarea() {
+    let description = |body: &str| {
+        let html = format!(r#"<h2><a href="/a">H</a></h2><div>{body}</div>"#);
+        run(&html).1[0].description.clone()
+    };
+    // 改行を含めば "\n"、含まなければ " " (ASCII の 5 種)
+    assert_eq!(description("<b>a</b>\n\t\t\t\n\t\t\t<b>b</b>"), "a\nb");
+    assert_eq!(description("<b>a</b>   \t  <b>b</b>"), "a b");
+    // 文字を含むテキストの前後の空白はそのまま
+    assert_eq!(
+        description("<b>a</b>\n\t\t x \n\t\t<b>b</b>"),
+        "a\n\t\t x \n\t\tb"
+    );
+    // NBSP と U+000B は空白の 5 種ではないので、そのまま
+    assert_eq!(
+        description("<b>a</b>\u{a0}\u{a0}<b>b</b>"),
+        "a\u{a0}\u{a0}b"
+    );
+    assert_eq!(description("<b>a</b>\u{b}\u{b}<b>b</b>"), "a\u{b}\u{b}b");
+    // <pre> の中は、入れ子の中でもまとめない
+    assert_eq!(
+        description("<pre><i><b>a</b>\n\n\n<b>b</b></i></pre>"),
+        "a\n\n\nb"
+    );
+    // コメントの前後は別のテキストとして数える
+    assert_eq!(description("<b>a</b>  \n <!-- c --> \t\t<b>b</b>"), "a\n b");
+}
+
 // ---- P-1: 壊れた入力でも panic しない (Result を返さない) ----
 
 #[test]
