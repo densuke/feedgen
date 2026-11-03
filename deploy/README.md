@@ -39,4 +39,5 @@ sudo systemctl enable --now feedgen-rs-update.timer
 
 - 再起動の瞬間は、数秒、Caddy が 502 を返す。
 - リポジトリが非公開の場合は、取得に認証が要る。`/etc/default/feedgen-rs-update` (モード 0600) で渡す設計にしてあるが、`update.sh` はまだ認証に対応していない。
-- `update.sh` は、リリースが 1 つもない間は、「最新の版を取得できません」で終了コード 1 になる (何も壊さない)。
+- `update.sh` は、リリースが 1 つもない間は、「最新の版を解釈できません」で終了コード 1 になる (GitHub が `/releases/latest` を `/releases` へ転送するため。何も壊さない)。2026-11-03 に e2 で確認した。
+- e2 の `~/work/feedgen-rs/VERSION` は、まだない (初回の手動配置のため)。最初のタグ付きリリースが出れば、`update.sh` が、それを入れて `VERSION` を作る。
