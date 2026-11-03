@@ -71,9 +71,10 @@ pub fn feed_root(body: &[u8]) -> Option<RootKind>;
 **Response**: 次の条件をすべて満たす `<link>` 要素を、文書順に `FeedInfo` にして返す。
 
 - `rel` の値を空白で分けたトークンの 1 つが `alternate` (ASCII の大文字小文字を区別しない)。
-- `type` を ASCII の小文字にしたものが、`application/rss+xml`、`application/atom+xml`、`application/xml`、`text/xml`、`application/json`、`application/feed+json` のどれかを含む (部分一致。`; charset=…` つきも可)。
-- `href` が、前後の空白を除いて空でない。
-- `href` を基準 URL に対して `Url::join` で解決した結果が、`http` または `https`。
+- `type` の **media type** が、`application/rss+xml`、`application/atom+xml`、`application/xml`、`text/xml`、`application/json`、`application/feed+json` のどれかと**完全一致**する。media type は、`;` 以降 (パラメータ) を除き、前後の空白を除き、ASCII の小文字にしたもの (`application/rss+xml; charset=utf-8` は `application/rss+xml`)。`application/xml-dtd` や `application/jsonl` のような、前方一致する別の型は拾わない。
+- `href` が、前後の **ASCII の空白**を除いて空でない (NBSP などの Unicode の空白は除かない。HTML の URL の扱いと同じ)。
+- `href` を基準 URL に対して `Url::join` で解決した結果が、`http` または `https` で、**認証部 (ユーザー名・パスワード) を持たない**。
+- 解決した URL から **fragment (`#…`) を除いた**ものが、基準 URL (同じく fragment を除いたもの) と同じでない (`href="#"` や `#top` は、ページ自身を指すので捨てる)。
 
 `<head>` に限らず、文書全体を対象にする。
 
@@ -81,7 +82,7 @@ pub fn feed_root(body: &[u8]) -> Option<RootKind>;
 
 **タイトル**は `title` 属性の前後の空白を除いたもの。属性がない、または空なら `不明なフィード`。
 
-同じ URL (解決後) が複数あるときは、最初の 1 件だけ残す。
+出力する URL は、fragment を除いたもの。同じ URL (解決後、fragment を除いたもの) が複数あるときは、最初の 1 件だけ残す。
 
 ### D-2 検出結果の順序
 
@@ -95,7 +96,8 @@ pub fn feed_root(body: &[u8]) -> Option<RootKind>;
 **Response**: 基準 URL のサイトのルートについて、2.2 の 8 本のパスを、**並列に** `HEAD` で確かめる。「ある」と判断したもののうち、**リストの順序で最も早いもの**を 1 件返す。1 件もなければ `None`。
 
 - 各 `HEAD` は取得層を通し (G-3)、さらに 10 秒の締切を外側から付ける。全体の所要時間は、最も遅い 1 本の締切 (最大 10 秒) で決まる (Python 版は最大 80 秒)。
-- 「ある」の条件: ステータスが **200**、かつ `Content-Type` (小文字) が `rss`、`atom`、`xml`、`json` のどれかを含み、**`html` を含まない**。
+- 「ある」の条件: ステータスが **200**、かつ `Content-Type` の **media type** (`;` 以降のパラメータを除き、小文字にしたもの。パラメータは見ない) が `rss`、`atom`、`xml`、`json` のどれかを含み、**`html` を含まない**。`application/octet-stream; filename=feed.xml` のように、パラメータにだけ `xml` がある値は、フィードとみなさない。
+- この判定は**緩い** (`application/rdf+xml` や `application/x-rss+xml` も通す。完全一致にすると、そのようなサーバーを取りこぼす。Python 版は `xml` を含めば通していた)。緩い判定による誤検出 (`application/vnd.api+json` など) は、パイプラインがその後に本文のルート要素で判定する (G-7、D-5) ので、害がない。
 - 失敗 (締切、取得層の拒否、通信エラー) は、そのパスを「ない」とする。エラーは返さない (Python 版と同じ)。
 
 **基準 URL**: パイプラインは、リダイレクトを追従した後の最終 URL (`Fetched.final_url`) を渡す。
@@ -167,6 +169,14 @@ pub fn feed_root(body: &[u8]) -> Option<RootKind>;
 | URL 自体がフィード | 検出しない (HTML として解析し 0 件) | ルート要素で判定して代理取得 (G-7) | 直す (決定済み) |
 | 先頭のフィードを使う | 先頭を使う | 同じ (D-2) | 維持。既知の限界 |
 | `HEAD` が 405 のサーバー | 見つからない | 同じ | 既知の限界 (7 章 D-D2) |
+| `href="#"`、`#frag` | fragment つきのまま出す。`#` はページ自身がフィードとして出る | fragment を除く。ページ自身を指すものは捨てる | 直す |
+| 認証部つきの URL | そのまま出す (パスワードが結果に残る) | 捨てる | 直す |
+| `type` の判定 | 部分一致 (`application/xml-dtd`、`application/jsonl` も通る) | media type の完全一致 | 直す |
+| 共通パスの `Content-Type` | パラメータも含めて `xml` を含めば通す | パラメータを除いた media type で、緩く判定 | 直す |
+| `href` の空白 | Unicode の空白も、そのまま残る | ASCII の空白だけ除く | HTML の仕様に合わせる |
+| 同じ属性が 2 つ (`href=/a href=/b`) | 後のもの (`/b`) | 先のもの (`/a`、ブラウザと同じ) | 受け入れ (html5ever の規則) |
+| `DOCTYPE` の内部サブセットの処理命令に、引用符が 1 つだけある | (該当なし) | ルート要素を見つけられず、フィードと判定しない | 既知の限界 (極めて稀) |
+| 共通パスの確認の所要時間 | 1 本ずつ (最大 80 秒) | 8 本すべての完了を待つ (最大 10 秒) | 既知の限界 (先に見つかっても、遅いパスを待つ。結果は正しい) |
 
 ## 7. 未決事項 (推奨つき)
 
