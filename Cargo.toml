@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/feedgen-core"]
+members = ["crates/feedgen-core", "crates/feedgen-server", "crates/feedgen-cli"]
 
 [workspace.package]
 version = "0.1.0"

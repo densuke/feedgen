@@ -39,6 +39,13 @@ impl Default for GenerateOptions {
     }
 }
 
+/// `user_agent` が、ヘッダにそのまま入れられる値か確かめる (api.md A-2)。
+/// 可視 ASCII (U+0020〜U+007E) のみ、1〜256 文字。違反は理由の文字列。
+pub fn validate_user_agent(user_agent: &str) -> std::result::Result<(), String> {
+    let _ = user_agent;
+    todo!("api.md A-2")
+}
+
 /// `generate` の結果 (G-1)。
 #[derive(Debug)]
 pub enum Outcome {
