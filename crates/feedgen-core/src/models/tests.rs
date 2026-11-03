@@ -1,4 +1,4 @@
-//! docs/specs/models.md 6 章のテスト表をテストにしたもの (RED)。
+//! docs/specs/models.md 6 章のテスト表をテストにしたもの。
 //!
 //! 期待値は、Python 版 (`feedgenerator.Rss201rev2Feed`) の実際の出力に基づく。
 //! 日時の `-0000` だけは、仕様 (M-7) に従って `+0000` に置き換えてある。
@@ -238,6 +238,100 @@ fn case_h_only_ampersand_and_angle_brackets_are_escaped() {
 fn empty_title_is_self_closing() {
     let xml = feed(vec![item("", "d", "https://example.com/1")]).to_xml(now());
     assert!(xml.contains("<item><title/><link>"), "{xml}");
+}
+
+// ---- M-8: 同じ時刻なら先に出た記事の値を採る (Python 版の厳密比較と同じ) ----
+
+#[test]
+fn case_f_tie_keeps_the_first_item_even_with_a_different_offset() {
+    // 09:30 +0900 と 00:30 +0000 は同じ時刻。
+    let mut jst = item("jst", "d", "https://example.com/1");
+    jst.pub_date = Some(dt(2026, 11, 3, 9, 30, 0, 9));
+    let mut utc = item("utc", "d", "https://example.com/2");
+    utc.pub_date = Some(dt(2026, 11, 3, 0, 30, 0, 0));
+
+    let jst_first = feed(vec![jst.clone(), utc.clone()]).to_xml(now());
+    assert!(
+        jst_first.contains("<lastBuildDate>Tue, 03 Nov 2026 09:30:00 +0900</lastBuildDate>"),
+        "{jst_first}"
+    );
+
+    let utc_first = feed(vec![utc, jst]).to_xml(now());
+    assert!(
+        utc_first.contains("<lastBuildDate>Tue, 03 Nov 2026 00:30:00 +0000</lastBuildDate>"),
+        "{utc_first}"
+    );
+}
+
+#[test]
+fn case_f_newest_item_first_is_chosen_too() {
+    // 最新が先頭、日付なしが間、古いのが最後。「最後の日付付き」を採る実装を弾く。
+    let mut new = item("new", "d", "https://example.com/1");
+    new.pub_date = Some(dt(2026, 11, 2, 12, 0, 0, 0));
+    let undated = item("undated", "d", "https://example.com/2");
+    let mut old = item("old", "d", "https://example.com/3");
+    old.pub_date = Some(dt(2026, 11, 1, 0, 0, 0, 0));
+
+    let xml = feed(vec![new, undated, old]).to_xml(now());
+    assert!(
+        xml.contains("<lastBuildDate>Mon, 02 Nov 2026 12:00:00 +0000</lastBuildDate>"),
+        "{xml}"
+    );
+}
+
+// ---- M-7: 負のオフセットと半時間のオフセット ----
+
+#[test]
+fn negative_and_half_hour_offsets_use_hhmm() {
+    let mut west = item("west", "d", "https://example.com/1");
+    west.pub_date = Some(dt(2026, 11, 3, 9, 30, 0, -5));
+    let mut india = item("india", "d", "https://example.com/2");
+    india.pub_date = Some(
+        FixedOffset::east_opt(5 * 3600 + 30 * 60)
+            .expect("オフセットが不正")
+            .with_ymd_and_hms(2026, 11, 3, 9, 30, 0)
+            .single()
+            .expect("日時が不正"),
+    );
+
+    let xml = feed(vec![west, india]).to_xml(now());
+    assert!(
+        xml.contains("<pubDate>Tue, 03 Nov 2026 09:30:00 -0500</pubDate>"),
+        "{xml}"
+    );
+    assert!(
+        xml.contains("<pubDate>Tue, 03 Nov 2026 09:30:00 +0530</pubDate>"),
+        "{xml}"
+    );
+}
+
+// ---- M-6: 除去する文字の境界を全部確かめる ----
+
+#[test]
+fn every_invalid_xml_character_is_removed_and_the_allowed_ones_stay() {
+    // 除去: U+0000〜U+0008、U+000B、U+000C、U+000E〜U+001F、U+FFFE、U+FFFF
+    let removed: String = ('\u{0}'..='\u{8}')
+        .chain(['\u{b}', '\u{c}'])
+        .chain('\u{e}'..='\u{1f}')
+        .chain(['\u{fffe}', '\u{ffff}'])
+        .collect();
+    // 残す: タブ、改行、復帰、空白、U+007F (XML 1.0 では有効)
+    let title = format!("a{removed}b\t\n\r c\u{7f}");
+
+    let xml = feed(vec![item(&title, "d", "https://example.com/1")]).to_xml(now());
+    assert!(
+        xml.contains("<item><title>ab\t\n\r c\u{7f}</title>"),
+        "{xml:?}"
+    );
+}
+
+#[test]
+fn element_that_becomes_empty_after_removal_is_self_closing() {
+    let xml = feed(vec![item("\u{1}", "\u{0}", "https://example.com/1")]).to_xml(now());
+    assert!(
+        xml.contains("<item><title/><link>https://example.com/1</link><description/></item>"),
+        "{xml}"
+    );
 }
 
 // ---- M-9: 入力の順序のまま出す ----
