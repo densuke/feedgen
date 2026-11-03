@@ -46,6 +46,24 @@ URL を受け取り、RSS を返す一連の流れ (オーケストレーショ�
 
 オプションは `max_items` (既定 20)、`user_agent`、`use_feed`、`feed_first`。範囲 (`max_items` は 1〜100) の検証は API 層で行い、core は検証済みの値を受け取る。
 
+```rust
+pub struct GenerateOptions { pub max_items: usize, pub user_agent: String, pub use_feed: bool, pub feed_first: bool }
+// Default: max_items = 20、user_agent = "feedgen/1.0"、use_feed = false、feed_first = false
+
+pub enum Outcome {
+    /// HTML を解析して生成したフィード。`detected` は、`feed_first` のときの検出結果 (文書順。なければ空)。
+    Generated { feed: RssFeed, detected: Vec<FeedInfo> },
+    /// 既存のフィードを、そのまま返す。本文はバイト列のまま変換しない。
+    Proxied { body: Vec<u8>, content_type: String, source_url: String },
+}
+
+impl<L: Lookup> FeedGenerator<L> {
+    pub async fn generate(&self, url: &str, options: &GenerateOptions, now: DateTime<FixedOffset>) -> Result<Outcome>;
+}
+```
+
+`FeedGenerator` は `SafeFetcher` を 1 つ持つ。`Proxied.source_url` は、本文を取得した URL (URL 自体がフィードのときは、リダイレクト後の最終 URL。検出したフィードのときは、そのフィードの URL)。
+
 ### G-2 処理の順序
 
 1. 対象の URL を、取得層で**1 回だけ**取得する (本文・ステータス・`Content-Type`)。以後は、この本文を使い回す。Python 版は検出と解析で別々に取得していた (2.1)。
@@ -56,6 +74,12 @@ URL を受け取り、RSS を返す一連の流れ (オーケストレーショ�
 6. `use_feed` が真で、検出できたら、最初の 1 件を取得して `Proxied` で返す。
 7. 検出または取得に失敗したときは、エラーを返さず、HTML 解析に進む (Python 版を踏襲)。
 8. HTML を解析し、メタデータと記事一覧を抽出して、`Generated` で返す。`feed_first` が真なら、検出した情報を `detected` に入れる。
+
+**基準 URL の使い分け**:
+- **解析 (`parser::parse`) の基準 URL は、利用者が渡した URL** (リダイレクト前)。記事の `guid` は `{基準 URL}#heading-{i}` の形で、購読者の RSS リーダーの重複判定に効く。リダイレクト後の URL を使うと、`http://mfujin.blog.jp/` が `https://mfujin.blog.jp/` に変わり、全記事の `guid` が変わる。チャンネルの `link` も同じ (Python 版と同じ)。
+- **検出 (`detect_from_html`、`probe_common_paths`) の基準 URL は、リダイレクト後の最終 URL** (`Fetched.final_url`)。取得済みの HTML の中の相対 URL は、実際に取得した場所に対して解決するのが正しく、`guid` には影響しない。
+
+**既知の限界**: 解析の基準 URL が `http://` のまま、リダイレクトされた先 (`https://`) の HTML の相対リンクを解決すると、リンクが `http://` になる (Python 版と同じ。サイト側のリダイレクトで、通常は問題にならない)。
 
 ### G-3 取得はすべて取得層を通す
 
@@ -117,9 +141,31 @@ JSON Feed は、この判定の対象にしない。
 2. `Content-Type` の `charset`
 3. 本文の先頭 1024 バイトにある `<meta charset>` または `<meta http-equiv="Content-Type">`
 
+判定の手順 (`decode_html(body: &[u8], content_type: &str) -> String`):
+1. 本文の先頭が BOM (UTF-8、UTF-16LE、UTF-16BE) なら、その文字コードを使う。BOM は、`Content-Type` や `<meta>` より優先する。
+2. `Content-Type` の `charset` パラメータ (引用符は除く) が、`encoding_rs` が知っているラベル (`Shift_JIS`、`shift_jis`、`x-sjis`、`windows-31j`、`EUC-JP`、`utf-8` など。大文字小文字は問わない) なら、それを使う。知らないラベルは、ないものとして次へ進む。
+3. 本文の先頭 1024 バイトにある `<meta charset=…>` または `<meta http-equiv="Content-Type" content="…charset=…">` の値 (引用符は、二重、単一、なしのいずれも可) が、知っているラベルなら、それを使う。
+4. 上のいずれでもなければ UTF-8。
+
+不正なバイト列は `U+FFFD` に置き換え (失敗しない)。決まった文字コードが UTF-8 以外でも、結果は UTF-8 の文字列になる。
+
 フィードの本文 (G-7) は、変換せず、バイト列のまま返す。
 
 **Why**: Python 版は、`charset` の指定がない `text/html` を `ISO-8859-1` として読み、Shift_JIS や EUC-JP のページが文字化けする (2.1)。実装は、`encoding_rs` などの確立したクレートを使う (自作しない)。
+
+### G-10 User-Agent
+
+**Event**: 外部へ通信するとき
+**Response**: すべての取得 (対象の URL、共通パスの `HEAD`、代理取得するフィード) に、`GenerateOptions.user_agent` を `User-Agent` ヘッダとして送る。取得層は、UA を引数で受け取る (`fetch_as(method, url, user_agent)`)。引数のない `fetch(method, url)` は、既定の `feedgen/1.0` を送る。`probe_common_paths` も、UA を引数で受け取る。
+
+**Why**: `User-Agent` のない取得を拒否するサイトがある。本番の呼び出しは、毎回 `user_agent` を指定している (e2 の実測。860 件中 852 件)。
+
+### G-11 取得の失敗と検出の失敗
+
+**Response**:
+- 対象の URL の取得は、`FeedError` で失敗する (取得層の拒否は `UnsafeUrl`、通信の失敗や 200 以外は `Http`)。G-8 の文面は `取得先が内容を返しませんでした (HTTP {status})`。
+- 検出の失敗 (共通パスの確認が見つけられない、検出した URL の取得が失敗する、200 以外、本文がフィードのルート要素でない) は、エラーにせず、HTML の解析に進む (G-2 の 7)。
+- 取得結果が 200 で本文が空でも、エラーにしない (記事が 0 件のフィードになる)。
 
 ## 4. 作る順序
 
@@ -128,8 +174,8 @@ JSON Feed は、この判定の対象にしない。
 1. **models.md**: `RssFeed` / `RssItem` と、RSS 2.0 の XML 出力。
    - 検証: Python (`feedgenerator.Rss201rev2Feed`) が出す XML と比べる。どこまで同一にするか (要素の順序、`guid` の `isPermaLink`、名前空間、`lastBuildDate`) を仕様に書く。
 2. **parser.md**: HTML パーサ。golden テストで BeautifulSoup と scraper の差を測る。(実装済み。実サイトでも Python 版と一致を確認)
-3. **detector.md**: 既存フィード検出。(次。G-2 の 5、G-7 の判定、共通パスの並列化を含む)
-4. **パイプライン**: 上記をつなぐ (G-1〜G-5)。
+3. **detector.md**: 既存フィード検出。(実装済み。独立レビューも反映済み)
+4. **パイプライン** (`generator`): 上記をつなぐ (G-1〜G-11)。文字コードの判定 (`charset`) を含む。
 5. **api.md**: axum の API と CLI。
 
 ## 5. golden テストの方法 (parser の前提)
@@ -155,3 +201,17 @@ JSON Feed は、この判定の対象にしない。
 - **D-G1 (決定)** URL 自体がフィードのとき、`use_feed` の値にかかわらず、そのまま代理取得として返す (G-7)。`use_feed=false` で feed の URL が渡された場合、Python 版は空のフィードを返すだけで、他に意味のある挙動がない。
 - **D-G2 (決定)** ステータスが 200 のときだけ成功とする (G-8)。ボット対策の応答 (202 など) が、空のフィードとして配信され続けるのを防ぐ。代わりにエラーを返すので、RSS リーダーによっては、フィードが「壊れている」と表示される可能性がある (空のフィードのままの方が気づかれにくいが、静かに失敗し続ける)。
 - **D-G3 (決定)** 文字コードは、BOM、`Content-Type`、`<meta>`、UTF-8 の順で決める (G-9)。`encoding_rs` を使う (新しい依存が増える)。
+
+## 7. テスト方針 (generator と charset)
+
+- **`charset`** (表のテスト。軽い): BOM、`Content-Type` の `charset` (ラベルの別名、大文字小文字、引用符)、`<meta charset>` (二重・単一・引用符なし)、`<meta http-equiv>`、優先順位 (BOM > `Content-Type` > `<meta>`)、1024 バイトより後ろの `<meta>` は無視、知らないラベルは次へ、不正なバイト列は `U+FFFD`、Shift_JIS と EUC-JP の実バイト列。
+- **`generate`** (重いテスト。ローカルのサイト用サーバー 1 台を使い、関心ごとにまとめる。サーバーは、パスごとに状態・`Content-Type`・本文・遅延を設定でき、受けたリクエスト (メソッド、パス、`User-Agent`) を記録する):
+  - 取得が**1 回だけ**であること (フラグなしなら、対象の `GET` 1 回だけ)。
+  - フィールド: チャンネルの `link` と `guid` が、渡した URL から作られ、`pub_date` が `now`。
+  - URL 自体がフィード (RSS 2.0、RSS 1.0 の RDF、Atom) → `use_feed` の値にかかわらず `Proxied`。本文はバイト列のまま、`Content-Type` は正規化。XHTML (`application/xhtml+xml`、ルートが `html`) は `Proxied` にならない。
+  - ステータス: 404、202、500 はエラー (文面に `HTTP {status}`)。200 で本文が空は、記事 0 件で成功。
+  - `use_feed`: `<link>` から見つけたフィードを取得して `Proxied` (共通パスの確認はしない)。`<link>` がなければ共通パスを確認。検出したフィードの取得が失敗、または本文がフィードでないときは、エラーにせず HTML の解析。
+  - `feed_first`: `Generated` で `detected` に検出結果。`use_feed` も真なら、`use_feed` が優先。
+  - UA が、対象、`HEAD`、フィードの取得のすべてに送られる。
+  - 文字コード: Shift_JIS のページ (`Content-Type` の `charset` と、`<meta>` のみの 2 通り) の記事のタイトルが、正しく読める。
+  - 取得層の拒否: ループバックや不正な URL は `UnsafeUrl`。
