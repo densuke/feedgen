@@ -116,5 +116,11 @@
     "max_items": 20,
     "compare_description": false,
     "note": "P-3: Python 版は短い <p> にも ... を付けるため、チャンネルの説明は比べない"
+  },
+  {
+    "name": "detect_links",
+    "base_url": "https://example.com/blog/",
+    "max_items": 20,
+    "detect": true
   }
 ]

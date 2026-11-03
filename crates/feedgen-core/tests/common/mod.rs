@@ -7,6 +7,7 @@ use std::fs;
 use std::path::Path;
 
 use chrono::{FixedOffset, TimeZone};
+use feedgen_core::detector::detect_from_html;
 use feedgen_core::parser::parse;
 use serde_json::Value;
 
@@ -74,5 +75,24 @@ pub fn check_entry(dir: &Path, entry: &Value) {
         assert_eq!(got.link, want["link"].as_str().unwrap(), "{at}: link");
         assert_eq!(got.guid.as_deref(), want["guid"].as_str(), "{at}: guid");
         assert_eq!(got.pub_date, Some(now), "{at}: pub_date は now (P-5)");
+    }
+
+    // 既存フィードの検出 (detector.md D-1)。期待値に feeds があるエントリだけ比べる。
+    if let Some(want_feeds) = expected["feeds"].as_array() {
+        let got: Vec<(String, String, String)> = detect_from_html(&html, base_url)
+            .into_iter()
+            .map(|f| (f.url, f.title, f.kind.label().to_string()))
+            .collect();
+        let want: Vec<(String, String, String)> = want_feeds
+            .iter()
+            .map(|f| {
+                (
+                    f["url"].as_str().unwrap().to_string(),
+                    f["title"].as_str().unwrap().to_string(),
+                    f["type"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect();
+        assert_eq!(got, want, "{name}: feeds");
     }
 }

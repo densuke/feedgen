@@ -54,4 +54,6 @@ golden!(
     // 空白だけのテキストは短くまとめられる (BeautifulSoup の挙動。実サイトで発見。2.3)
     whitespace_indent,
     whitespace_special,
+    // 既存フィードの検出 (detector.md D-1)。Python 版の検出器の出力と比べる
+    detect_links,
 );

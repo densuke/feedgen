@@ -2,6 +2,7 @@
 //!
 //! Rust 版リブート。仕様は docs/rust-reboot-spec.md と docs/specs/ を参照。
 
+pub mod detector;
 pub mod error;
 pub mod fetch;
 pub mod models;

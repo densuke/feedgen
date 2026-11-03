@@ -1,0 +1,40 @@
+{
+  "metadata": {
+    "title": "Detect",
+    "description": "",
+    "link": "https://example.com/blog/"
+  },
+  "items": [],
+  "feeds": [
+    {
+      "url": "https://example.com/index.rdf",
+      "title": "Site RSS",
+      "type": "RSS"
+    },
+    {
+      "url": "https://example.com/blog/atom.xml",
+      "title": "Site Atom",
+      "type": "Atom"
+    },
+    {
+      "url": "https://example.com/xml/feed.xml",
+      "title": "Alt Style Feed",
+      "type": "XML"
+    },
+    {
+      "url": "https://cdn.example.org/f.rss",
+      "title": "不明なフィード",
+      "type": "RSS"
+    },
+    {
+      "url": "https://example.com/feed.json",
+      "title": "JSON",
+      "type": "JSON"
+    },
+    {
+      "url": "https://example.com/in-body.xml",
+      "title": "In body",
+      "type": "RSS"
+    }
+  ]
+}
