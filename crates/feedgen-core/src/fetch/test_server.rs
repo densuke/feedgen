@@ -96,6 +96,15 @@ async fn handle(mut stream: TcpStream, port: u16) {
             let headers = ["Content-Encoding: gzip", "Content-Length: 5"];
             send(&mut stream, "200 OK", &headers, b"hello").await;
         }
+        // Content-Encoding が複数 (identity の後ろに gzip)。最初のヘッダだけでは見逃す。
+        "/multi-encoding" => {
+            let headers = [
+                "Content-Encoding: identity",
+                "Content-Encoding: gzip",
+                "Content-Length: 5",
+            ];
+            send(&mut stream, "200 OK", &headers, b"hello").await;
+        }
         "/chunked" => {
             let headers = ["Transfer-Encoding: chunked"];
             send(

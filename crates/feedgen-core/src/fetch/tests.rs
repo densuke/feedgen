@@ -21,22 +21,44 @@ fn ip(s: &str) -> IpAddr {
 
 /// 名前 → アドレスの固定表。載っていない名前は解決失敗になる。
 struct FakeLookup {
-    map: HashMap<&'static str, Vec<IpAddr>>,
+    map: HashMap<String, Vec<IpAddr>>,
 }
 
 impl FakeLookup {
     fn new() -> Self {
         let local = vec![ip("127.0.0.1")];
-        let map = HashMap::from([
+        let entries = [
             ("pub.test", local.clone()),
             ("pub2.test", local.clone()),
             ("loopback.test", local.clone()),
-            ("localhost", local),
+            ("localhost", local.clone()),
+            ("localhost.", local), // 末尾ドット付きも 127.0.0.1 に解決される
             ("internal.test", vec![ip("10.0.0.1")]),
             ("mixed.test", vec![ip("8.8.8.8"), ip("10.0.0.1")]),
             ("empty.test", vec![]),
-        ]);
+        ];
+        let map = entries
+            .into_iter()
+            .map(|(name, ips)| (name.to_string(), ips))
+            .collect();
         Self { map }
+    }
+
+    fn with(mut self, name: &str, ips: Vec<IpAddr>) -> Self {
+        self.map.insert(name.to_string(), ips);
+        self
+    }
+}
+
+/// 解決が締切を超えて返らない名前解決。
+struct StuckLookup;
+
+impl Lookup for StuckLookup {
+    fn lookup(&self, _host: &str) -> impl Future<Output = io::Result<Vec<IpAddr>>> + Send {
+        async move {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            Ok(vec![ip("8.8.8.8")])
+        }
     }
 }
 
@@ -72,6 +94,14 @@ fn assert_unsafe(result: Result<Fetched>, what: &str) {
     );
 }
 
+/// 上限・締切・圧縮の違反は `Http` で、文面まで一致すること (S-6)。
+fn assert_http(result: Result<Fetched>, message: &str) {
+    assert!(
+        matches!(&result, Err(FeedError::Http(m)) if m == message),
+        "{message}: 期待したエラーではない {result:?}"
+    );
+}
+
 // ---- S-2、S-3: URL 文字列の検査 ----
 
 #[test]
@@ -87,7 +117,9 @@ fn check_url_rejects_ambiguous_and_unsafe_strings() {
         "gopher://example.com/",
         "http:///path",
         "http://",
-        "", // e2 の探査 (空の url)
+        "",                        // e2 の探査 (空の url)
+        "http:evil@8.8.8.8/?://x", // `//` を欠いた認証部
+        "HTTP:evil@8.8.8.8/",
     ];
     for raw in rejected {
         assert!(check_url(raw).is_err(), "拒否されるはず: {raw:?}");
@@ -101,6 +133,7 @@ fn check_url_accepts_normal_urls() {
         "http://8.8.8.8/",
         "http://[2606:4700:4700::1111]/",
         "https://例え.jp/",
+        "HTTP://example.com/",
     ];
     for raw in accepted {
         assert!(check_url(raw).is_ok(), "許可されるはず: {raw:?}");
@@ -143,6 +176,10 @@ fn is_public_ip_denies_every_non_public_range() {
         "64:ff9b::7f00:1",
         "64:ff9b:1::1",
         "2002:7f00:1::",
+        "2001:2::1",
+        "2001:10::1",
+        "3fff::1",
+        "::ffff:0:1:2",
         "2001:0:4136:e378:8000:63bf:3fff:fdd2",
     ];
     for s in denied {
@@ -187,6 +224,14 @@ async fn literal_and_numeric_forms_are_denied() {
         "http://[2002:7f00:1::]/",
         "http://[2001:0:4136:e378:8000:63bf:3fff:fdd2]/",
         "http://[fe80::1%25eth0]/",
+        "http://[2001:2::1]/",
+        "http://[2001:10::1]/",
+        "http://[3fff::1]/",
+        "http://[::ffff:0:1:2]/",
+        "http://LOCALHOST/",
+        "http://localhost./",
+        "HTTP://127.0.0.1/",
+        "http:evil@8.8.8.8/?://x",
         "http://127.0.0.1\\@8.8.8.8/",
         "",
     ];
@@ -340,7 +385,7 @@ async fn response_limits_and_encoding_are_enforced() {
     )
     .await
     .expect("本文を待って固まった: 早期に拒否されていない");
-    assert!(declared.is_err(), "宣言サイズ超過は拒否されるはず");
+    assert_http(declared, "応答が大きすぎます");
 
     // 宣言なしで上限を超えてストリームされたら打ち切って拒否する
     let streamed = tokio::time::timeout(
@@ -349,17 +394,23 @@ async fn response_limits_and_encoding_are_enforced() {
     )
     .await
     .expect("固まった");
-    assert!(streamed.is_err(), "ストリームの上限超過は拒否されるはず");
+    assert_http(streamed, "応答が大きすぎます");
 
     // 遅く返し続ける応答は全体の締切で拒否する
     let slow = tokio::time::timeout(guard, fetcher.fetch(Method::Get, &url_of(&server, "/slow")))
         .await
         .expect("締切が効かず固まった");
-    assert!(slow.is_err(), "全体の締切超過は拒否されるはず");
+    assert_http(slow, "応答に時間がかかりすぎています");
 
     // identity 以外の Content-Encoding は拒否する
     let gzip = fetcher.fetch(Method::Get, &url_of(&server, "/gzip")).await;
-    assert!(gzip.is_err(), "gzip は拒否されるはず");
+    assert_http(gzip, "未対応の圧縮形式です");
+
+    // ヘッダが複数のときも全件を検査する (identity の後ろに gzip)
+    let multi = fetcher
+        .fetch(Method::Get, &url_of(&server, "/multi-encoding"))
+        .await;
+    assert_http(multi, "未対応の圧縮形式です");
 }
 
 // ---- S-8: プロキシ ----
@@ -404,6 +455,99 @@ async fn proxy_environment_variables_are_ignored() {
 
     assert_eq!(fetched.body, b"hello");
     assert_eq!(proxy.accepted(), 0, "プロキシ経由で通信してはいけない");
+}
+
+// ---- S-4: ポート ----
+
+#[tokio::test]
+async fn ports_other_than_80_and_443_are_denied_even_for_public_addresses() {
+    let fetcher = strict();
+    for raw in [
+        "http://8.8.8.8:8080/",
+        "https://8.8.8.8:8443/",
+        "http://8.8.8.8:22/",
+    ] {
+        let url = Url::parse(raw).unwrap();
+        let result = fetcher.resolve_checked(&url).await;
+        assert!(
+            matches!(&result, Err(FeedError::UnsafeUrl(m)) if m == DENIED),
+            "{raw}: 拒否されるはずが {result:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn ports_80_and_443_pass_the_port_check() {
+    let fetcher = strict();
+    for raw in [
+        "http://8.8.8.8/",
+        "http://8.8.8.8:80/",
+        "https://8.8.8.8/",
+        "https://8.8.8.8:443/",
+    ] {
+        let url = Url::parse(raw).unwrap();
+        assert!(
+            fetcher.resolve_checked(&url).await.is_ok(),
+            "許可されるはず: {raw}"
+        );
+    }
+}
+
+// ---- S-3、S-4: IDN は名前解決とアドレス固定まで通る ----
+
+#[tokio::test]
+async fn idn_host_is_resolved_and_pinned() {
+    let server = test_server::spawn().await;
+    // 名前解決には punycode 化された名前が渡される
+    let puny = Url::parse("http://例え.jp/")
+        .unwrap()
+        .host_str()
+        .unwrap()
+        .to_string();
+    let lookup = FakeLookup::new().with(&puny, vec![ip("127.0.0.1")]);
+    let fetcher = SafeFetcher::for_test(lookup, vec![ip("127.0.0.1")], Limits::default());
+
+    let url = format!("http://例え.jp:{}/ok", server.addr.port());
+    let fetched = fetcher.fetch(Method::Get, &url).await.unwrap();
+    assert_eq!(fetched.body, b"hello");
+}
+
+// ---- S-6: 名前解決も通算の締切に含める ----
+
+#[tokio::test]
+async fn lookup_that_never_returns_is_cut_off_by_the_deadline() {
+    let limits = Limits {
+        max_bytes: 1024,
+        request_timeout: Duration::from_secs(5),
+        total_timeout: Duration::from_secs(1),
+    };
+    let fetcher = SafeFetcher::for_test(StuckLookup, vec![], limits);
+
+    let result = tokio::time::timeout(
+        Duration::from_secs(5),
+        fetcher.fetch(Method::Get, "http://stuck.test/"),
+    )
+    .await
+    .expect("名前解決の締切が効かず固まった");
+    let err = result.unwrap_err();
+    assert!(matches!(err, FeedError::UnsafeUrl(_)), "{err:?}");
+    assert_eq!(err.to_string(), DENIED);
+}
+
+// ---- S-10: 本番の入口 (実際の名前解決) ----
+
+#[tokio::test]
+async fn production_fetcher_denies_localhost_via_real_resolution() {
+    // OS の名前解決は localhost だけを使う (外部ネットワークに依存しない)。
+    let resolved = SystemLookup.lookup("localhost").await.unwrap();
+    assert!(!resolved.is_empty());
+    assert!(resolved.iter().all(|a| a.is_loopback()), "{resolved:?}");
+
+    // 本番用のコンストラクタは許可アドレスを持たず、ループバックを拒否する。
+    let result = SafeFetcher::new()
+        .fetch(Method::Get, "http://localhost/")
+        .await;
+    assert_unsafe(result, "http://localhost/");
 }
 
 // ---- 定数 (S-5、S-6) ----
