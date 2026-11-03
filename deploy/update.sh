@@ -34,8 +34,9 @@ log "更新します: ${current:-なし} -> $version"
 # 2. 取得とチェックサムの検証
 name=feedgen-$TARGET-$version.tar.gz
 base=$RELEASE_BASE_URL/download/v$version
-curl -fsS --max-time 120 -o "$WORK/$name" "$base/$name" || die "アーカイブを取得できません"
-curl -fsS --max-time 30 -o "$WORK/$name.sha256" "$base/$name.sha256" || die "チェックサムを取得できません"
+# アセットの URL は、別のホストへ 302 で転送されるので、-L で辿る (/latest の判定は、行き先を読むので、辿らない)。
+curl -fsSL --max-redirs 3 --max-time 120 -o "$WORK/$name" "$base/$name" || die "アーカイブを取得できません"
+curl -fsSL --max-redirs 3 --max-time 30 -o "$WORK/$name.sha256" "$base/$name.sha256" || die "チェックサムを取得できません"
 expected=$(awk 'NR==1 {print $1}' "$WORK/$name.sha256")
 actual=$(sha256_of "$WORK/$name")
 [[ $expected =~ ^[0-9a-f]{64}$ && $expected == "$actual" ]] || die "チェックサムが一致しません"
