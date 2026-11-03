@@ -111,6 +111,15 @@ async fn handle(mut stream: TcpStream, port: u16) {
             ];
             send(&mut stream, "200 OK", &headers, b"hello").await;
         }
+        // Content-Type が 2 つ。最初の 1 つだけを見ると、後ろの text/html を見逃す。
+        "/two-content-types" => {
+            let headers = [
+                "Content-Type: application/rss+xml",
+                "Content-Type: text/html",
+                "Content-Length: 5",
+            ];
+            send(&mut stream, "200 OK", &headers, b"hello").await;
+        }
         "/chunked" => {
             let headers = ["Transfer-Encoding: chunked"];
             send(

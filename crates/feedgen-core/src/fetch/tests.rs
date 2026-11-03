@@ -287,6 +287,12 @@ async fn fetch_basics_over_pinned_resolution() {
         .await
         .unwrap();
     assert_eq!(no_header.content_type, "");
+    // ヘッダが複数なら、すべてを ", " でつなぐ (S-11)
+    let two = fetcher
+        .fetch(Method::Get, &url_of(&server, "/two-content-types"))
+        .await
+        .unwrap();
+    assert_eq!(two.content_type, "application/rss+xml, text/html");
 
     // Accept-Encoding: identity を送る (S-7)
     let echo = fetcher

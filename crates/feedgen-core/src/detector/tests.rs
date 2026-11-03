@@ -47,6 +47,7 @@ fn kind_is_decided_from_the_type_attribute() {
         ("APPLICATION/RSS+XML", "RSS"),
         ("application/rss+xml; charset=utf-8", "RSS"),
         ("application/atom+xml;charset=UTF-8", "Atom"),
+        ("  Application/RSS+XML  ", "RSS"), // 前後の空白は除く
     ];
     for (ty, label) in cases {
         let found = feeds(&format!(r#"<link rel="alternate" type="{ty}" href="/f">"#));
@@ -57,7 +58,17 @@ fn kind_is_decided_from_the_type_attribute() {
 
 #[test]
 fn non_feed_types_are_ignored() {
-    for ty in ["text/html", "", "application/xhtml+xml", "text/plain"] {
+    for ty in [
+        "text/html",
+        "",
+        "application/xhtml+xml",
+        "text/plain",
+        // 前方一致する別の型は拾わない (完全一致にする)
+        "application/xml-dtd",
+        "text/xml-external-parsed-entity",
+        "application/jsonl",
+        "application/rss+xml-x",
+    ] {
         let html = format!(r#"<link rel="alternate" type="{ty}" href="/f">"#);
         assert!(feeds(&html).is_empty(), "type={ty:?}");
     }
@@ -97,6 +108,11 @@ fn href_is_resolved_against_the_base_url() {
         ("https://other.example/f", "https://other.example/f"),
         // 前後の空白は取り除く (Python 版は末尾に空白が残る。直す)
         ("  /f  ", "https://example.com/f"),
+        ("\n/f\t", "https://example.com/f"), // ASCII の空白 (改行、タブ) も除く
+        // NBSP は ASCII の空白ではないので除かない (HTML の URL の扱い)。URL では % エンコードされる
+        ("/a\u{a0}", "https://example.com/a%C2%A0"),
+        // fragment は除く
+        ("/f#b", "https://example.com/f"),
     ];
     for (href, expected) in cases {
         let html = format!(r#"<link rel="alternate" type="application/rss+xml" href="{href}">"#);
@@ -114,12 +130,38 @@ fn unusable_href_values_are_dropped() {
         "mailto:a@b.c",
         "data:text/xml,x",
         "ftp://example.com/f",
+        // ページ自身を指す (fragment を除くと基準 URL と同じ)
+        "#",
+        "#top",
+        "post.html#x",
+        // 認証部つき
+        "http://a:b@h.example/f",
     ] {
         let html = format!(r#"<link rel="alternate" type="application/rss+xml" href="{href}">"#);
         assert!(feeds(&html).is_empty(), "href={href:?}");
     }
     // href 属性がない
     assert!(feeds(r#"<link rel="alternate" type="application/rss+xml">"#).is_empty());
+}
+
+#[test]
+fn urls_with_credentials_are_dropped_even_when_the_base_has_them() {
+    let link = r#"<link rel="alternate" type="application/rss+xml" href="/f">"#;
+    let html = format!("<html><head>{link}</head></html>");
+    assert!(feeds_in(&html, "https://user:pw@example.com/p").is_empty());
+    // 認証部のない基準なら出る (対照)
+    assert_eq!(feeds_in(&html, "https://example.com/p").len(), 1);
+}
+
+#[test]
+fn fragments_are_removed_before_deduplication() {
+    let html = r#"<html><head>
+        <link rel="alternate" type="application/rss+xml" title="A" href="/f#b">
+        <link rel="alternate" type="application/rss+xml" title="B" href="/f">
+        <link rel="alternate" type="application/rss+xml" title="C" href="/g#x">
+        </head></html>"#;
+    let urls: Vec<String> = feeds_in(html, BASE).into_iter().map(|f| f.0).collect();
+    assert_eq!(urls, ["https://example.com/f", "https://example.com/g"]);
 }
 
 #[test]
@@ -383,8 +425,10 @@ async fn html_responses_are_skipped_and_the_first_feed_wins() {
 
 #[tokio::test]
 async fn earlier_path_wins_even_when_a_later_one_is_also_a_feed() {
+    // 先頭の /feed は応答が遅く、後ろの /atom.xml は即答する。「先に完了したもの」ではなく、
+    // 「リストの順序で早いもの」が選ばれること。
     let server = probe_server::spawn(vec![
-        Route::new("/feed", 200, "application/xml"),
+        Route::new("/feed", 200, "application/xml").delayed(Duration::from_millis(300)),
         Route::new("/atom.xml", 200, "application/atom+xml"),
     ])
     .await;
@@ -432,6 +476,13 @@ async fn unsuitable_responses_are_not_feeds() {
         ("text/plain", 200, "text/plain"),
         ("202 の xml (200 だけが成功)", 202, "application/rss+xml"),
         ("HEAD を拒否 (405)", 405, ""),
+        // パラメータにだけ xml がある値は、フィードとみなさない
+        (
+            "octet-stream の filename に xml",
+            200,
+            "application/octet-stream; filename=feed.xml",
+        ),
+        ("text/plain の format に xml", 200, "text/plain; format=xml"),
     ];
     for (label, status, content_type) in cases {
         let server = probe_server::spawn(vec![Route::new("/feed", status, content_type)]).await;
@@ -522,8 +573,13 @@ async fn a_probe_that_exceeds_its_timeout_counts_as_missing() {
 
 #[tokio::test]
 async fn refused_targets_are_missing_not_errors_and_never_connected() {
-    // 許可アドレスのない取得器 (本番と同じ判定) は、127.0.0.1 を拒否する。
-    let strict = SafeFetcher::for_test(LocalLookup, vec![], Limits::default());
+    // 許可アドレスが空だと、ポート検査 (80/443 のみ) で先に止まり、IP の検査に届かない。
+    // 別のアドレスだけを許可すると、ポートの制限は外れ、127.0.0.1 は IP の検査で拒否される。
+    let strict = SafeFetcher::for_test(
+        LocalLookup,
+        vec![IpAddr::from([10, 0, 0, 9])],
+        Limits::default(),
+    );
     let server = probe_server::spawn(vec![Route::new("/feed", 200, "application/rss+xml")]).await;
 
     let info = probe_common_paths(&strict, &site(&server, "/")).await;
