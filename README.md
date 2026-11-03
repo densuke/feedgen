@@ -18,7 +18,7 @@ URLの内容を分析して、RSS 2.0 のフィードを生成するツール。
 リリースのバイナリ (Linux x86_64, 静的リンク) を使うか、ソースからビルドする。
 
 ```bash
-# ソースからビルド (Rust 1.85 以上)
+# ソースからビルド (Rust 1.88 以上。let チェーンを使うため)
 cargo build --release
 # 成果物: target/release/feedgen-server と target/release/feedgen
 ```
