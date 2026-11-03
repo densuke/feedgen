@@ -133,15 +133,17 @@ fn probe_kind(response: &Fetched, path: &str) -> Option<FeedKind> {
     if response.status != 200 {
         return None;
     }
-    let content_type = response.content_type.to_ascii_lowercase();
+    // パラメータは見ない (`application/octet-stream; filename=feed.xml` をフィードとみなさない)。
+    let media_type = html::media_type(&response.content_type);
+    // 緩い判定 (`application/rdf+xml` なども通す)。誤検出は、本文のルート要素の判定 (D-5) で弾く。
     let feed_like = ["rss", "atom", "xml", "json"]
         .iter()
-        .any(|word| content_type.contains(word));
+        .any(|word| media_type.contains(word));
     // `application/xhtml+xml` は `xml` を含むので、`html` を含むものは除く。
-    if !feed_like || content_type.contains("html") {
+    if !feed_like || media_type.contains("html") {
         return None;
     }
-    match kind_from_media_type(&content_type) {
+    match kind_from_media_type(&media_type) {
         // `application/xml` などは、パスで補う。
         FeedKind::Xml => Some(kind_from_path(path)),
         kind => Some(kind),

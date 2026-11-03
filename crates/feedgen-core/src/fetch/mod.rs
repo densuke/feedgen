@@ -263,12 +263,14 @@ impl<L: Lookup> SafeFetcher<L> {
             });
         }
 
+        // ヘッダが複数あるときは、すべてを ", " でつなぐ。UTF-8 でない値は無視する (S-11)。
         let content_type = response
             .headers()
-            .get(CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or("")
-            .to_string();
+            .get_all(CONTENT_TYPE)
+            .iter()
+            .filter_map(|value| value.to_str().ok())
+            .collect::<Vec<_>>()
+            .join(", ");
 
         // ヘッダが複数あるときも全件を見る。1 つでも identity 以外なら拒否する (S-7)。
         let unsupported_encoding =
