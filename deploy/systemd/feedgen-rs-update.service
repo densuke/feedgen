@@ -1,0 +1,15 @@
+[Unit]
+Description=feedgen-rs の更新 (最新のタグ付きリリースへ置き換え)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=densuke
+Environment=INSTALL_DIR=/home/densuke/work/feedgen-rs
+Environment="SYSTEMCTL=sudo -n systemctl"
+# リポジトリを非公開にした場合などの設定 (任意。秘密情報はここに置き、モードは 0600)。
+EnvironmentFile=-/etc/default/feedgen-rs-update
+ExecStart=/home/densuke/work/feedgen-rs/update.sh
+TimeoutStartSec=300
+# NoNewPrivileges などの制限は付けない (sudo で feedgen-rs.service の再起動をするため)。

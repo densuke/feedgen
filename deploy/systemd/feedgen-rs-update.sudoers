@@ -1,0 +1,3 @@
+# /etc/sudoers.d/feedgen-rs-update (モード 0440)。
+# 更新スクリプトが、feedgen-rs.service の再起動だけを、パスワードなしでできるようにする。
+densuke ALL=(root) NOPASSWD: /usr/bin/systemctl restart feedgen-rs.service

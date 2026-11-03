@@ -1,0 +1,10 @@
+[Unit]
+Description=feedgen-rs の更新を、週 1 回確認する (Dependabot の月曜 9:00 JST のあと)
+
+[Timer]
+OnCalendar=Mon *-*-* 12:00:00 Asia/Tokyo
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
