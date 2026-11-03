@@ -1,447 +1,167 @@
 # feedgen
 
-URLの内容を分析してRSSフィードを生成するツール。
+URLの内容を分析して、RSS 2.0 のフィードを生成するツール。Rust 製の Web API (`feedgen-server`) とコマンドライン (`feedgen`) がある。
 
 ## 機能
 
-- 既存RSS/Atomフィードの自動検出・代理取得
-- Webページの多戦略HTML解析によるRSS 2.0形式フィード生成
-- TailwindCSS等のモダンサイト対応
-- プラグイン型URL正規化システム（Google News、YouTube、Instagram等の特殊サイト対応）
-- Google News URLデコード機能（実際のニュース記事URLへの変換）
-- Instagram プロフィールページ対応
-  - 軽量版: 認証不要でプロフィール情報取得
-  - フル機能版: 認証ありで投稿詳細取得（instaloader使用）
-- Gemini APIによる翻訳機能（タイトル・説明の日本語化、キャッシュ対応）
-- コマンドライン及び設定ファイルによる設定
-- ライブラリとしても使用可能
+- 既存の RSS / Atom / JSON Feed の検出と代理取得
+- 多戦略の HTML 解析による RSS 2.0 の生成
+- URL 自体が RSS / RDF / Atom のときは、そのまま返す
+- 文字コードの判定 (BOM、`Content-Type`、`<meta>`)
+- SSRF 対策つきの取得 (下の「安全性」)
+- 設定ファイル (YAML) によるコマンドラインの既定値
+
+**対象外**: Instagram、Google News のデコード、翻訳、redis キャッシュ。以前の Python 版にあった機能で、利用実績がなく、Rust 版には移植していない。Python 版はフェードアウト中で、保守しない。
 
 ## インストール
 
-```bash
-pip install -e .
-```
-
-## 使用方法
-
-### コマンドライン
+リリースのバイナリ (Linux x86_64, 静的リンク) を使うか、ソースからビルドする。
 
 ```bash
-# 基本的な使用方法
-feedgen https://example.com
-
-# 既存フィード代理取得（推奨）
-feedgen --use-feed https://example.com
-
-# フィード検出優先
-feedgen --feed-first https://example.com
-
-# 設定ファイル指定
-feedgen --config config.yaml https://example.com
-
-# 出力ファイル指定
-feedgen --output feed.xml https://example.com
-
-# 最大記事数指定
-feedgen --max-items 10 https://example.com
-
-# Web API URL生成
-feedgen --generate-url --api-host https://my-feedgen.com https://example.com
-
-# 全オプション指定でのURL生成
-feedgen --generate-url --api-host my-api.com --use-feed --max-items 5 https://blog.example.com
-
-# Google News URLデコード機能
-feedgen --decode-google-news https://news.google.com/topics/CAAqBwgKMKHL9QowkqbaAg
-
-# デコード設定付き
-feedgen --decode-google-news --google-news-interval 2 --google-news-timeout 15 https://news.google.com/topics/CAAqBwgKMKHL9QowkqbaAg
-
-# 設定ファイルでのGoogle News機能有効化
-feedgen --config config.yaml https://news.google.com/topics/CAAqBwgKMKHL9QowkqbaAg
-
-# Google News URLキャッシュ機能
-feedgen --decode-google-news --google-news-cache-ttl 7200 --google-news-cache-type memory https://news.google.com/topics/CAAqBwgKMKHL9QowkqbaAg
-
-# Redisキャッシュ使用
-feedgen --decode-google-news --google-news-cache-type redis https://news.google.com/topics/CAAqBwgKMKHL9QowkqbaAg
-
-# Instagram プロフィールページ
-feedgen https://www.instagram.com/username/
-
-# 翻訳機能（Gemini API使用）
-feedgen --translate --translation-api-key YOUR_API_KEY https://example.com
-
-# 翻訳先言語指定
-feedgen --translate --translation-api-key YOUR_API_KEY --translation-target-lang ko https://example.com
-
-# 環境変数でAPI key指定
-export GEMINI_API_KEY=YOUR_API_KEY
-feedgen --translate https://example.com
+# ソースからビルド (Rust 1.85 以上)
+cargo build --release
+# 成果物: target/release/feedgen-server と target/release/feedgen
 ```
 
-### Instagram対応について
+リリースは [GitHub の Releases](https://github.com/densuke/feedgen/releases) に、`feedgen-x86_64-unknown-linux-musl-<版>.tar.gz` (と `.sha256`) として置かれる。中身は `feedgen` と `feedgen-server` の 2 つ。
 
-Instagramプロフィールページから投稿情報を取得してRSSフィードを生成できます。
-
-#### 軽量版（デフォルト）
-
-認証不要でプロフィール情報のみ取得します。
-
-- **対応URL**: プロフィールページのみ（例: `https://www.instagram.com/username/`）
-- **取得情報**: プロフィール名、フォロワー数、フォロー数、投稿数、バイオ
-- **制限事項**: 個別投稿の詳細は取得できません
-- **認証**: 不要
+## Web API
 
 ```bash
-# 軽量版の使用（デフォルト）
-feedgen https://www.instagram.com/username/
+# 起動 (既定は 127.0.0.1:8000)
+feedgen-server
+feedgen-server --host 0.0.0.0 --port 8080
+
+# 環境変数でも指定できる (引数が優先)
+FEEDGEN_HOST=127.0.0.1 FEEDGEN_PORT=8000 feedgen-server
 ```
 
-#### フル機能版（要認証）
+公開するときは、リバースプロキシ (Caddy など) の背後に置く。`0.0.0.0` にするのは、直接公開するときだけ。`SIGTERM` と Ctrl-C で、処理中のリクエストの完了を待って (最大 30 秒) 終了する。
 
-instaloaderライブラリを使用して投稿の詳細情報を取得します。
+### エンドポイント
 
-- **取得情報**: 投稿内容、いいね数、コメント数、投稿日時など
-- **認証**: Instagram認証が必要
-- **設定**: `config.yaml`で有効化
+| パス | 内容 |
+|---|---|
+| `GET /feed` | URL からフィードを返す |
+| `GET /health` | 死活確認。`{"status":"healthy","service":"feedgen API"}` |
+| `GET /` | サービス情報 |
 
-**インストール**:
+CORS は、全オリジン、`GET` のみ許可する。
+
+### `/feed` のパラメータ
+
+| 名前 | 内容 | 既定 |
+|---|---|---|
+| `url` | 対象の URL (必須。2048 文字以内) | なし |
+| `max_items` | 最大記事数 (1〜100) | 20 |
+| `use_feed` | 既存のフィードがあれば、代理取得する (真偽値) | false |
+| `feed_first` | 既存フィードの検出結果をヘッダに付け、HTML の解析も続ける (真偽値) | false |
+| `user_agent` | 取得時の User-Agent (可視 ASCII、1〜256 文字) | `feedgen-api/1.0` |
+
+真偽値は `true` / `1` / `on` / `t` / `y` / `yes` と、`false` / `0` / `off` / `f` / `n` / `no` (大文字小文字は問わない)。
+
 ```bash
-uv add instaloader
-# または
-uv sync --extra instagram
+curl "http://127.0.0.1:8000/feed?url=https://example.com/&max_items=5"
+curl "http://127.0.0.1:8000/feed?url=https://example.com/&use_feed=true"
 ```
 
-**設定例** (`config.yaml`):
+### 応答
+
+- 生成したフィード: `application/rss+xml; charset=utf-8`
+- 代理取得: 元のフィードの本文のまま。`Content-Type` は `application/rss+xml` か `application/atom+xml` (元の `charset` があれば引き継ぐ)
+- `feed_first` で検出したとき: `X-Existing-Feed-URL`、`X-Existing-Feed-Title` (日本語などは `%XX` で符号化)、`X-Existing-Feed-Type`
+- エラー本文は `{"detail": "…"}`
+
+| 状況 | ステータス |
+|---|---|
+| `url` なし、`max_items` の範囲外、真偽値でない値 | 422 |
+| `url` が長すぎる、`user_agent` が不正、非対応の機能 (`decode_google_news=true`、`translate=true`) | 400 |
+| 取得できない URL (内部アドレスなど)、取得の失敗 | 400 |
+| 処理に 60 秒以上かかった | 504 |
+| 同時に処理している `/feed` が 32 件を超えた | 503 |
+| 想定外のエラー | 500 (詳細は返さない) |
+
+`google_news_*` や `translation_*` など、Python 版のパラメータは、受け付けて無視する。
+
+## コマンドライン
+
+```bash
+feedgen https://example.com/                      # 標準出力へ
+feedgen --use-feed https://example.com/           # 既存フィードがあれば代理取得
+feedgen --feed-first https://example.com/         # 検出結果を標準エラーに出す
+feedgen -o feed.xml --max-items 10 https://example.com/
+feedgen --config config.yaml https://example.com/
+```
+
+| オプション | 内容 |
+|---|---|
+| `-c`, `--config <PATH>` | 設定ファイル (なければ、カレントの `config.yaml`) |
+| `-o`, `--output <PATH>` | 出力先のファイル (なければ標準出力) |
+| `--max-items <N>` | 最大記事数 (1〜100) |
+| `--user-agent <STR>` | User-Agent |
+| `--use-feed` / `--feed-first` | 上の API と同じ |
+| `--generate-url` | 取得せず、Web API の URL を生成して出力 |
+| `--api-host <HOST>` | `--generate-url` の API のホスト |
+
+失敗したときは、終了コード 1 で、メッセージを標準エラーに出す。
+
+### Web API の URL の生成
+
+```bash
+feedgen --generate-url --api-host feedgen.example.com --max-items 5 --use-feed https://blog.example.com/
+# https://feedgen.example.com/feed?url=https%3A%2F%2Fblog.example.com%2F&max_items=5&use_feed=true
+```
+
+### 設定ファイル
+
+読む項目は 3 つだけ。優先順位は、コマンドライン引数、設定ファイル、既定の順。未知のキーは、警告を出して無視する。
+
 ```yaml
-instagram:
-  use_full_client: true
-  username: "あなたのユーザー名"
-  session_file: "~/.config/instaloader/session-あなたのユーザー名"
-  max_posts: 20
+max_items: 20
+user_agent: "feedgen/1.0"
+api_base_url: https://feedgen.example.com
 ```
 
-**認証手順の詳細**: [docs/instagram_setup.md](docs/instagram_setup.md)
+## 安全性
 
-```
+公開するサービスが、利用者の指定した URL を取得するので、取得の層で SSRF を防ぐ。
 
-### 翻訳機能について
+- `http` と `https` のみ。ポートは 80 と 443 のみ
+- DNS を 1 回だけ解決して、そのアドレスに接続する。非公開のアドレス (ループバック、プライベート、リンクローカル、メタデータなど) は拒否する
+- リダイレクトは自分で辿り、移動先ごとに同じ検査をする
+- 本文は 2 MiB まで。全体の締切は 45 秒
+- 取得失敗のエラーに、内部のアドレスなどを含めない
 
-Google Gemini APIを使用して記事のタイトルと説明を日本語に翻訳できます。
+詳細は [docs/specs/ssrf.md](docs/specs/ssrf.md)。
 
-#### 設定方法
+## 配備と自動更新
 
-**環境変数で設定**（推奨）:
-```bash
-export GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
-```
+e2 での配備、更新スクリプト (検証、置き換え、起動後の `/health` が通らなければ自動でロールバック)、systemd のタイマーは [deploy/README.md](deploy/README.md)。仕様は [docs/specs/release.md](docs/specs/release.md)。
 
-**設定ファイルで設定** (`config.yaml`):
-```yaml
-translation:
-  enabled: true
-  api_key: "YOUR_GEMINI_API_KEY"
-  model: "gemini-1.5-flash"
-  target_lang: "ja"
-  cache_enabled: true
-  cache_type: "memory"
-  cache_ttl: 86400
-```
-
-#### CLI使用例
-
-```bash
-# 環境変数でAPI keyを設定
-export GEMINI_API_KEY="YOUR_API_KEY"
-feedgen --translate https://example.com
-
-# コマンドラインでAPI key指定
-feedgen --translate --translation-api-key YOUR_API_KEY https://example.com
-
-# 翻訳先言語を指定（デフォルト: ja）
-feedgen --translate --translation-target-lang ko https://example.com
-```
-
-#### API使用例
-
-```bash
-# 翻訳機能有効化
-curl "http://localhost:8000/feed?url=https://example.com&translate=true&translation_api_key=YOUR_KEY"
-
-# 翻訳先言語指定
-curl "http://localhost:8000/feed?url=https://example.com&translate=true&translation_api_key=YOUR_KEY&translation_target_lang=ko"
-```
-
-#### ライブラリとして使用
-
-```python
-from feedgen.core import FeedGenerator
-from feedgen.core.translator import Translator
-from feedgen.core.translation_cache import MemoryTranslationCache
-
-# Translatorの作成
-cache = MemoryTranslationCache(max_size=1000, default_ttl=86400)
-translator = Translator(
-    api_key="YOUR_GEMINI_API_KEY",
-    model="gemini-1.5-flash",
-    cache=cache,
-    target_lang="ja"
-)
-
-# FeedGeneratorで翻訳を有効化
-generator = FeedGenerator(
-    translation_enabled=True,
-    translator=translator
-)
-
-feed = generator.generate_feed("https://example.com")
-print(feed.to_xml())
-```
-
-#### キャッシュ機能
-
-翻訳結果はキャッシュされ、同じテキストの翻訳をスキップできます。
-
-**メリット**:
-- **コスト削減**: API呼び出し回数の削減
-- **高速化**: キャッシュヒット時の即座な応答
-- **効率化**: 同一記事の重複翻訳を回避
-
-**キャッシュタイプ**:
-1. **メモリキャッシュ（memory）**: プロセス内のメモリに保存（デフォルト）
-2. **Redisキャッシュ（redis）**: 外部Redisサーバーに保存（プロセス間で共有）
-
-#### 注意事項
-
-- Google Gemini API keyが必要です（https://ai.google.dev/ で取得）
-- 翻訳に失敗した場合は元のテキストがそのまま使用されます
-- キャッシュはデフォルトで有効ですが、設定で無効化可能です
-- `google-generativeai` パッケージが必要です
-
-### Webサービス
-
-```bash
-# サーバー起動（簡単コマンド）
-feedgen-serve
-
-# サーバー起動（オプション指定）
-feedgen-serve --host 0.0.0.0 --port 8000 --reload
-
-# または直接起動
-uv run uvicorn feedgen.api.main:app --host 0.0.0.0 --port 8000
-
-# API呼び出し例
-curl "http://localhost:8000/feed?url=https://example.com&use_feed=true"
-
-# Google News URLデコード
-curl "http://localhost:8000/feed?url=https://news.google.com/topics/CAAqBwgKMKHL9QowkqbaAg&decode_google_news=true"
-
-# デコード設定付き
-curl "http://localhost:8000/feed?url=https://news.google.com/topics/CAAqBwgKMKHL9QowkqbaAg&decode_google_news=true&google_news_interval=2"
-
-# 複数の設定パラメータ指定
-curl "http://localhost:8000/feed?url=https://news.google.com/topics/CAAqBwgKMKHL9QowkqbaAg&decode_google_news=true&google_news_interval=2&google_news_timeout=15&google_news_max_retries=5"
-
-# キャッシュ機能付き
-curl "http://localhost:8000/feed?url=https://news.google.com/topics/CAAqBwgKMKHL9QowkqbaAg&decode_google_news=true&google_news_cache_ttl=7200&google_news_cache_type=memory"
-
-# 翻訳機能
-curl "http://localhost:8000/feed?url=https://example.com&translate=true&translation_api_key=YOUR_KEY"
-
-# 翻訳 + Google Newsデコード
-curl "http://localhost:8000/feed?url=https://news.google.com/topics/CAAqBwgKMKHL9QowkqbaAg&decode_google_news=true&translate=true&translation_api_key=YOUR_KEY"
-```
-
-#### API仕様書
-
-サーバー起動後、以下のURLでAPI仕様書を確認できます：
-- **Swagger UI**: http://localhost:8000/docs  
-- **ReDoc**: http://localhost:8000/redoc
-
-### ライブラリとして
-
-```python
-from feedgen.core import FeedGenerator
-from feedgen.core.google_news_decoder import GoogleNewsDecoderConfig
-
-# 基本的な使用方法
-generator = FeedGenerator()
-feed = generator.generate_feed("https://example.com")
-print(feed.to_xml())
-
-# Google News URLデコード機能付き
-config = GoogleNewsDecoderConfig(
-    decode_enabled=True,
-    request_interval=2,
-    request_timeout=15
-)
-generator = FeedGenerator(google_news_config=config)
-feed = generator.generate_feed("https://news.google.com/topics/CAAqBwgKMKHL9QowkqbaAg")
-print(feed.to_xml())
-
-# Google News URLデコーダーを直接使用
-from feedgen.core.google_news_decoder import GoogleNewsURLDecoder
-from feedgen.core.cache import MemoryURLDecodeCache
-
-decoder = GoogleNewsURLDecoder(request_interval=1)
-google_news_url = "https://news.google.com/articles/CBMiSWh0dHBzOi8vd3d3LnRva3lvLW5wLmNvLmpwL2FydGljbGUvNTUwMDYw0gEA"
-decoded_url = decoder.decode_url(google_news_url)
-print(f"デコード結果: {decoded_url}")
-
-# キャッシュ機能付きGoogle News URLデコーダー
-cache = MemoryURLDecodeCache(max_size=1000, default_ttl=3600)
-decoder_with_cache = GoogleNewsURLDecoder(request_interval=1, cache=cache)
-decoded_url = decoder_with_cache.decode_url(google_news_url)
-print(f"キャッシュ付きデコード結果: {decoded_url}")
-
-# キャッシュ統計の確認
-stats = cache.get_stats()
-print(f"キャッシュ統計: ヒット={stats['hits']}, ミス={stats['misses']}, ヒット率={stats['hit_rate']:.2%}")
-
-# Instagram プロフィール情報の取得（軽量版）
-feed = generator.generate_feed("https://www.instagram.com/username/")
-print(feed.to_xml())
-
-# Instagram フル機能版の使用
-from feedgen.core.instagram_client import InstagramFullClient
-
-instagram_client = InstagramFullClient(
-    username="あなたのユーザー名",
-    session_file="~/.config/instaloader/session-あなたのユーザー名",
-    max_posts=20
-)
-instagram_client.login()
-
-generator = FeedGenerator(
-    instagram_username="あなたのユーザー名",
-    instagram_session_file="~/.config/instaloader/session-あなたのユーザー名",
-    use_instagram_full_client=True
-)
-feed = generator.generate_feed("https://www.instagram.com/username/")
-print(feed.to_xml())
-```
+main への push で、GitHub Actions がビルドしてリリースする。Dependabot が、毎週月曜に、依存 (cargo) と Actions の更新を提案し、テストが通れば、自動でマージして、新しい版をリリースする。
 
 ## 開発
 
-```bash
-# テスト実行
-uv run pytest
-
-# コード品質チェック
-uv run ruff check
-```
-
-## 設定ファイル
-
-設定ファイル例（config.example.yaml）:
-```yaml
-# フィード生成の基本設定
-max_items: 20
-cache_duration: 3600
-user_agent: "feedgen/1.0"
-
-# Web API設定（URL生成機能用） 
-api_base_url: https://my-feedgen.example.com
-
-# Google News URLデコード設定
-google_news:
-  decode_enabled: false           # デコード機能有効化（デフォルト: false）
-  request_interval: 1             # リクエスト間隔（秒、デフォルト: 1）
-  request_timeout: 10             # タイムアウト（秒、デフォルト: 10）
-  max_retries: 3                  # 最大リトライ回数（デフォルト: 3）
-  enable_logging: true            # デコードログ出力（デフォルト: true）
-
-  # キャッシュ設定（コスト削減と高速化のため）
-  cache_enabled: true             # キャッシュ機能有効化（デフォルト: true）
-  cache_type: memory              # キャッシュタイプ（memory/redis、デフォルト: memory）
-  cache_ttl: 86400                # キャッシュ有効期限（秒、デフォルト: 24時間）
-  cache_max_size: 1000            # メモリキャッシュ最大サイズ（デフォルト: 1000）
-  redis_url: redis://localhost:6379/0  # Redis接続URL（Redisタイプ時のみ）
-  redis_key_prefix: "feedgen:gnews:"   # Redisキープレフィックス（デフォルト）
-
-# 翻訳設定
-translation:
-  enabled: false                  # 翻訳機能の有効化（デフォルト: false）
-  api_key: "YOUR_GEMINI_API_KEY"  # Gemini API キー（環境変数GEMINI_API_KEY推奨）
-  model: "gemini-1.5-flash"       # 使用するモデル（デフォルト: gemini-1.5-flash）
-  source_lang: "auto"             # 翻訳元言語（auto=自動検出）
-  target_lang: "ja"               # 翻訳先言語（デフォルト: ja）
-
-  # キャッシュ設定
-  cache_enabled: true             # キャッシュ有効化（デフォルト: true）
-  cache_type: "memory"            # memory または redis（デフォルト: memory）
-  cache_ttl: 86400                # キャッシュ有効期限（秒、デフォルト: 24時間）
-  cache_max_size: 1000            # メモリキャッシュ最大サイズ（デフォルト: 1000）
-  redis_url: "redis://localhost:6379/0"  # Redis接続URL（Redisタイプ時のみ）
-```
-
-### URL生成機能
-
-設定ファイルでapi_base_urlを設定すると、--api-hostオプションなしでURL生成ができます：
+仕様 ([docs/specs/](docs/specs/)) を先に書き、テストを先に書いてから、実装する。
 
 ```bash
-# 設定ファイル使用
-feedgen --config config.yaml --generate-url https://example.com
-
-# 出力例: https://my-feedgen.example.com/feed?url=https%3A%2F%2Fexample.com
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+bash deploy/tests/test_deploy.sh   # 配備スクリプトのテスト
 ```
 
-## Google News URLデコード機能について
+構成:
 
-この機能は、Google News特有の暗号化されたURL（`https://news.google.com/articles/CBMi...`形式）を実際のニュース記事のURLに変換します。
+| クレート・ディレクトリ | 内容 |
+|---|---|
+| `crates/feedgen-core` | 取得、文字コード、検出、解析、パイプライン |
+| `crates/feedgen-server` | Web API (axum) |
+| `crates/feedgen-cli` | コマンドライン |
+| `deploy/` | e2 の更新スクリプトと systemd |
+| `docs/specs/` | 仕様 (ssrf、models、parser、pipeline、detector、api、release) |
+| `tools/gen_golden.py` | Python 版の出力を、比較用の期待値にする道具 (解析のテスト用) |
 
-### 動作例
+## ライセンス
 
-```bash
-# Google News URL（変換前）
-https://news.google.com/articles/CBMiSWh0dHBzOi8vd3d3LnRva3lvLW5wLmNvLmpwL2FydGljbGUvNTUwMDYw0gEA
-
-# デコード後の実際のURL例
-https://www.tokyo-np.co.jp/article/550060
-```
-
-### Google News URLキャッシュ機能
-
-同じGoogle News URLが複数回デコードされる場合、キャッシュ機能によりAPI呼び出しを削減できます。
-
-#### キャッシュのメリット
-
-- **コスト削減**: 同じURLの重複デコードを回避
-- **高速化**: キャッシュヒット時の即座な応答
-- **レート制限回避**: API呼び出し頻度の削減
-
-#### キャッシュタイプ
-
-1. **メモリキャッシュ（memory）**
-   - プロセス内のメモリに保存
-   - 高速アクセス
-   - プロセス終了時にクリア
-
-2. **Redisキャッシュ（redis）**  
-   - 外部Redisサーバーに保存
-   - プロセス間で共有
-   - 永続化可能
-
-#### キャッシュ統計の確認
-
-```python
-from feedgen.core.cache import MemoryURLDecodeCache
-
-cache = MemoryURLDecodeCache()
-# ... URLデコード処理 ...
-
-stats = cache.get_stats()
-print(f"ヒット数: {stats['hits']}")
-print(f"ミス数: {stats['misses']}")  
-print(f"ヒット率: {stats['hit_rate']:.2%}")
-print(f"キャッシュサイズ: {stats['size']}")
-```
-
-### 注意事項
-
-- この機能は `googlenewsdecoder` ライブラリに依存しています
-- デコード処理には時間がかかる場合があります（設定可能なリクエスト間隔による）
-- レート制限やネットワークエラーに対するリトライ機能を内蔵しています
-- デコードに失敗した場合は元のGoogle News URLが使用されます
-- キャッシュ機能はデフォルトで有効ですが、設定で無効化可能です
+MIT
