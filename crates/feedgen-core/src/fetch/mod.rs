@@ -1,15 +1,23 @@
 //! SSRF 対策付きの取得層 (docs/specs/ssrf.md)。
 //!
-//! RED 段階のスタブ。実装は仕様 S-1〜S-10 に従って後続のコミットで書く。
+//! 取得先 URL を検査し、名前解決を自前で 1 回だけ行い、検査済みのアドレスに固定して
+//! 接続する。リダイレクトは追従せず、遷移先ごとに最初から検査をやり直す。
+
+mod address;
+mod url_check;
 
 use std::future::Future;
 use std::io;
-use std::net::IpAddr;
-use std::time::Duration;
+use std::net::{IpAddr, SocketAddr};
+use std::time::{Duration, Instant};
 
-use url::Url;
+use reqwest::header::{ACCEPT_ENCODING, CONTENT_ENCODING, LOCATION};
+use url::{Host, Url};
 
-use crate::error::Result;
+use crate::error::{FeedError, Result};
+
+pub use address::is_public_ip;
+pub use url_check::check_url;
 
 /// 応答本文の上限 (S-6)。
 pub const MAX_BYTES: usize = 2 * 1024 * 1024;
@@ -21,6 +29,8 @@ pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 pub const TOTAL_TIMEOUT: Duration = Duration::from_secs(45);
 /// 内部アドレス・解決失敗・解決結果が空のときに返す共通の文面 (S-9)。
 pub const DENIED: &str = "このアドレスへのアクセスは許可されていません";
+
+const REDIRECT_STATUS: [u16; 5] = [301, 302, 303, 307, 308];
 
 /// 取得の上限値。本番は [`Limits::default`] のみ使う。
 #[derive(Debug, Clone, Copy)]
@@ -40,14 +50,13 @@ impl Default for Limits {
     }
 }
 
-/// URL 文字列を検査し、解析済みの `Url` を返す (S-2、S-3)。
-pub fn check_url(_raw: &str) -> Result<Url> {
-    todo!("S-2, S-3")
+/// 拒否の共通エラー (S-9)。
+pub(crate) fn denied() -> FeedError {
+    FeedError::UnsafeUrl(DENIED.to_string())
 }
 
-/// 公開アドレスかどうか (S-4)。
-pub fn is_public_ip(_ip: IpAddr) -> bool {
-    todo!("S-4")
+fn http_error(message: &str) -> FeedError {
+    FeedError::Http(message.to_string())
 }
 
 /// 名前解決の抽象。テストでは固定表に差し替える。
@@ -59,9 +68,17 @@ pub trait Lookup: Send + Sync {
 pub struct SystemLookup;
 
 impl Lookup for SystemLookup {
-    fn lookup(&self, _host: &str) -> impl Future<Output = io::Result<Vec<IpAddr>>> + Send {
-        // 未実装 (S-4: tokio::net::lookup_host を使う)
-        async move { Err(io::Error::other("未実装")) }
+    fn lookup(&self, host: &str) -> impl Future<Output = io::Result<Vec<IpAddr>>> + Send {
+        let host = host.to_string();
+        async move {
+            let mut addrs: Vec<IpAddr> = Vec::new();
+            for socket in tokio::net::lookup_host((host.as_str(), 0)).await? {
+                if !addrs.contains(&socket.ip()) {
+                    addrs.push(socket.ip());
+                }
+            }
+            Ok(addrs)
+        }
     }
 }
 
@@ -80,15 +97,19 @@ pub struct Fetched {
     pub final_url: Url,
 }
 
+/// 1 回の通信の結果。リダイレクトなら `location` を持つ。
+struct Hop {
+    status: u16,
+    location: Option<String>,
+    body: Vec<u8>,
+}
+
 /// SSRF 対策付きの取得器。
 pub struct SafeFetcher<L: Lookup = SystemLookup> {
-    #[allow(dead_code)]
     lookup: L,
-    #[allow(dead_code)]
     limits: Limits,
     /// テストでだけ、検査を通すアドレスを足せる (S-10: 本番には存在しない)。
     #[cfg(test)]
-    #[allow(dead_code)]
     allow: Vec<IpAddr>,
 }
 
@@ -122,8 +143,145 @@ impl<L: Lookup> SafeFetcher<L> {
     }
 
     /// 検査を通した上で取得する (S-1〜S-8)。
-    pub async fn fetch(&self, _method: Method, _url: &str) -> Result<Fetched> {
-        todo!("S-1〜S-8")
+    pub async fn fetch(&self, method: Method, url: &str) -> Result<Fetched> {
+        let deadline = Instant::now() + self.limits.total_timeout;
+        let mut current = check_url(url)?;
+
+        for _ in 0..=MAX_REDIRECTS {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(http_error("応答に時間がかかりすぎています"));
+            }
+            let addrs = self.resolve_checked(&current).await?;
+            let hop = self.send_once(method, &current, &addrs, remaining).await?;
+
+            let Some(location) = hop.location else {
+                return Ok(Fetched {
+                    status: hop.status,
+                    body: hop.body,
+                    final_url: current,
+                });
+            };
+            current = next_url(&current, &location)?;
+        }
+        Err(FeedError::UnsafeUrl("リダイレクトが多すぎます".into()))
+    }
+
+    /// host を解決し、全アドレスが公開であることを確かめる (S-4)。
+    async fn resolve_checked(&self, url: &Url) -> Result<Vec<IpAddr>> {
+        let addrs = match url.host() {
+            Some(Host::Ipv4(ip)) => vec![IpAddr::V4(ip)],
+            Some(Host::Ipv6(ip)) => vec![IpAddr::V6(ip)],
+            Some(Host::Domain(name)) => self.lookup.lookup(name).await.map_err(|_| denied())?,
+            None => return Err(denied()),
+        };
+        if addrs.is_empty() || !addrs.iter().all(|&ip| self.is_allowed(ip)) {
+            return Err(denied());
+        }
+        Ok(addrs)
+    }
+
+    fn is_allowed(&self, ip: IpAddr) -> bool {
+        #[cfg(test)]
+        if self.allow.contains(&ip) {
+            return true;
+        }
+        is_public_ip(ip)
+    }
+
+    /// 検査済みアドレスに固定して 1 回だけ通信する。リダイレクトは追わない (S-5〜S-8)。
+    async fn send_once(
+        &self,
+        method: Method,
+        url: &Url,
+        addrs: &[IpAddr],
+        remaining: Duration,
+    ) -> Result<Hop> {
+        let mut builder = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .no_proxy()
+            .timeout(self.limits.request_timeout.min(remaining));
+        if let Some(Host::Domain(name)) = url.host() {
+            let port = url.port_or_known_default().unwrap_or(80);
+            let pinned: Vec<SocketAddr> =
+                addrs.iter().map(|&ip| SocketAddr::new(ip, port)).collect();
+            builder = builder.resolve_to_addrs(name, &pinned);
+        }
+        let client = builder
+            .build()
+            .map_err(|_| http_error("取得に失敗しました"))?;
+
+        let verb = match method {
+            Method::Get => reqwest::Method::GET,
+            Method::Head => reqwest::Method::HEAD,
+        };
+        let mut response = client
+            .request(verb, url.clone())
+            .header(ACCEPT_ENCODING, "identity")
+            .send()
+            .await
+            .map_err(|e| request_error(&e))?;
+
+        let status = response.status().as_u16();
+        if REDIRECT_STATUS.contains(&status)
+            && let Some(location) = response
+                .headers()
+                .get(LOCATION)
+                .and_then(|value| value.to_str().ok())
+        {
+            return Ok(Hop {
+                status,
+                location: Some(location.to_string()),
+                body: Vec::new(),
+            });
+        }
+
+        let encoding = response
+            .headers()
+            .get(CONTENT_ENCODING)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        if !encoding.is_empty() && encoding != "identity" {
+            return Err(http_error("未対応の圧縮形式です"));
+        }
+        let max = self.limits.max_bytes;
+        if response
+            .content_length()
+            .is_some_and(|len| len > max as u64)
+        {
+            return Err(http_error("応答が大きすぎます"));
+        }
+
+        let mut body = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(|e| request_error(&e))? {
+            if body.len() + chunk.len() > max {
+                return Err(http_error("応答が大きすぎます"));
+            }
+            body.extend_from_slice(&chunk);
+        }
+        Ok(Hop {
+            status,
+            location: None,
+            body,
+        })
+    }
+}
+
+/// `Location` を現在の URL に対して解決し、改めて検査する (S-5)。
+fn next_url(current: &Url, location: &str) -> Result<Url> {
+    url_check::check_chars(location)?;
+    let joined = current.join(location).map_err(|_| denied())?;
+    check_url(joined.as_str())
+}
+
+/// 通信エラーを、接続先の詳細を含まない文面に直す (S-9)。
+fn request_error(e: &reqwest::Error) -> FeedError {
+    if e.is_timeout() {
+        http_error("応答に時間がかかりすぎています")
+    } else {
+        http_error("取得に失敗しました")
     }
 }
 
