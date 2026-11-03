@@ -1,0 +1,15 @@
+{
+  "metadata": {
+    "title": "Entities & more",
+    "description": "x   y...",
+    "link": "https://example.com/"
+  },
+  "items": [
+    {
+      "title": "Tom & Jerry © あ 😀 <b>",
+      "description": "x   y",
+      "link": "https://example.com/e1",
+      "guid": "https://example.com/#heading-0"
+    }
+  ]
+}

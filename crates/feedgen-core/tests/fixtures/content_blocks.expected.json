@@ -1,0 +1,21 @@
+{
+  "metadata": {
+    "title": "Blocks",
+    "description": "This paragraph is long enough to be used as an item. link...",
+    "link": "https://example.com/"
+  },
+  "items": [
+    {
+      "title": "This paragraph is long enough to be used as an item. link",
+      "description": "This paragraph is long enough to be used as an item. link",
+      "link": "https://example.com/p/1",
+      "guid": "https://example.com/#content-0"
+    },
+    {
+      "title": "Another block that is definitely longer than thirty characters. out",
+      "description": "Another block that is definitely longer than thirty characters. out",
+      "link": "https://other.example.org/p/3",
+      "guid": "https://example.com/#content-2"
+    }
+  ]
+}

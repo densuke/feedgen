@@ -1,0 +1,45 @@
+{
+  "metadata": {
+    "title": "Cards",
+    "description": "",
+    "link": "https://example.com/"
+  },
+  "items": [
+    {
+      "title": "Heading in card",
+      "description": "Heading in cardgo some more text here",
+      "link": "https://example.com/c/2",
+      "guid": "https://example.com/#card-0"
+    },
+    {
+      "title": "Card one title lineread",
+      "description": "Card one title lineread",
+      "link": "https://example.com/c/1",
+      "guid": "https://example.com/#card-1"
+    },
+    {
+      "title": "Clickable card three with text",
+      "description": "Clickable card three with text",
+      "link": "https://example.com/c/3",
+      "guid": "https://example.com/#card-2"
+    },
+    {
+      "title": "Article text long enough here empty href",
+      "description": "Article text long enough here empty href",
+      "link": "https://example.com/",
+      "guid": "https://example.com/#card-3"
+    },
+    {
+      "title": "An item with enough text but no link at all",
+      "description": "An item with enough text but no link at all",
+      "link": "https://example.com/",
+      "guid": "https://example.com/#card-4"
+    },
+    {
+      "title": "Heading in cardgo some more text here",
+      "description": "Heading in cardgo some more text here",
+      "link": "https://example.com/c/2",
+      "guid": "https://example.com/#content-1"
+    }
+  ]
+}

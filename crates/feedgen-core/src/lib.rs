@@ -5,6 +5,7 @@
 pub mod error;
 pub mod fetch;
 pub mod models;
+pub mod parser;
 
 pub use error::{FeedError, Result};
 pub use models::{RssFeed, RssItem};

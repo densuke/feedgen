@@ -1,0 +1,21 @@
+{
+  "metadata": {
+    "title": "Dedupe",
+    "description": "",
+    "link": "https://example.com/"
+  },
+  "items": [
+    {
+      "title": "Alpha",
+      "description": "alpha \nBeta\nGamma\nDelta\nEpsilon",
+      "link": "https://example.com/1",
+      "guid": "https://example.com/#heading-0"
+    },
+    {
+      "title": "Beta",
+      "description": "",
+      "link": "https://example.com/3",
+      "guid": "https://example.com/#heading-2"
+    }
+  ]
+}

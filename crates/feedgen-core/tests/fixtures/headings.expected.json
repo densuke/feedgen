@@ -1,0 +1,27 @@
+{
+  "metadata": {
+    "title": "Blog Top",
+    "description": "A blog about things",
+    "link": "https://example.com/"
+  },
+  "items": [
+    {
+      "title": "First post",
+      "description": "Summary of first post.",
+      "link": "https://example.com/entry/1",
+      "guid": "https://example.com/#heading-1"
+    },
+    {
+      "title": "Second post",
+      "description": "Second summary",
+      "link": "https://other.example.org/2",
+      "guid": "https://example.com/#heading-3"
+    },
+    {
+      "title": "Third",
+      "description": "dup title",
+      "link": "https://example.com/entry/3",
+      "guid": "https://example.com/#heading-4"
+    }
+  ]
+}

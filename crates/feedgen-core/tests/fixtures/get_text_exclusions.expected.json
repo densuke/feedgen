@@ -1,0 +1,15 @@
+{
+  "metadata": {
+    "title": "T",
+    "description": "Desc text...",
+    "link": "https://example.com/"
+  },
+  "items": [
+    {
+      "title": "Title漢",
+      "description": "Desc text",
+      "link": "https://example.com/a",
+      "guid": "https://example.com/#heading-0"
+    }
+  ]
+}

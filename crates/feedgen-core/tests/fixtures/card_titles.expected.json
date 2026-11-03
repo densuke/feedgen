@@ -1,0 +1,21 @@
+{
+  "metadata": {
+    "title": "Card titles",
+    "description": "",
+    "link": "https://example.com/"
+  },
+  "items": [
+    {
+      "title": "Valid title line here",
+      "description": "hi\ntiny\nValid title line here\nmore",
+      "link": "https://example.com/z",
+      "guid": "https://example.com/#card-0"
+    },
+    {
+      "title": "hi",
+      "description": "hi\ntiny\nValid title line here\nmore",
+      "link": "https://example.com/z",
+      "guid": "https://example.com/#content-0"
+    }
+  ]
+}

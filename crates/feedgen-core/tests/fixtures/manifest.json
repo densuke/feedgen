@@ -1,0 +1,60 @@
+[
+  {
+    "name": "headings",
+    "base_url": "https://example.com/",
+    "max_items": 20
+  },
+  {
+    "name": "get_text_exclusions",
+    "base_url": "https://example.com/",
+    "max_items": 20,
+    "compare_description": false,
+    "note": "P-3: Python 版は短い <p> にも ... を付けるため、チャンネルの説明は比べない"
+  },
+  {
+    "name": "find_next_descendant",
+    "base_url": "https://example.com/",
+    "max_items": 20,
+    "compare_description": false,
+    "note": "P-3: Python 版は短い <p> にも ... を付けるため、チャンネルの説明は比べない"
+  },
+  {
+    "name": "cards",
+    "base_url": "https://example.com/",
+    "max_items": 20
+  },
+  {
+    "name": "card_titles",
+    "base_url": "https://example.com/",
+    "max_items": 20
+  },
+  {
+    "name": "content_blocks",
+    "base_url": "https://example.com/",
+    "max_items": 20,
+    "compare_description": false,
+    "note": "P-3: Python 版は短い <p> にも ... を付けるため、チャンネルの説明は比べない"
+  },
+  {
+    "name": "entities",
+    "base_url": "https://example.com/",
+    "max_items": 20,
+    "compare_description": false,
+    "note": "P-3: Python 版は短い <p> にも ... を付けるため、チャンネルの説明は比べない"
+  },
+  {
+    "name": "dedupe_limit",
+    "base_url": "https://example.com/",
+    "max_items": 3
+  },
+  {
+    "name": "meta_fallback",
+    "base_url": "https://example.com/",
+    "max_items": 20
+  },
+  {
+    "name": "long_card",
+    "base_url": "https://example.com/",
+    "max_items": 20
+  }
+]

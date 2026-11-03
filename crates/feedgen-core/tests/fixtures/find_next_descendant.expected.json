@@ -1,0 +1,15 @@
+{
+  "metadata": {
+    "title": "T",
+    "description": "after paragraph...",
+    "link": "https://example.com/"
+  },
+  "items": [
+    {
+      "title": "Heading with inner divinner div text",
+      "description": "inner div text",
+      "link": "https://example.com/a",
+      "guid": "https://example.com/#heading-0"
+    }
+  ]
+}
