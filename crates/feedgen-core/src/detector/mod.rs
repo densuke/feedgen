@@ -99,7 +99,7 @@ pub async fn probe_common_paths<L: Lookup>(
 pub(crate) async fn probe_common_paths_with<L: Lookup>(
     fetcher: &SafeFetcher<L>,
     base_url: &str,
-    _user_agent: &str,
+    user_agent: &str,
     probe_timeout: Duration,
 ) -> Option<FeedInfo> {
     let base = Url::parse(base_url).ok()?;
@@ -115,10 +115,13 @@ pub(crate) async fn probe_common_paths_with<L: Lookup>(
     let probes = COMMON_PATHS.iter().map(move |path| async move {
         let url = format!("{origin}{path}");
         // 締切、取得層の拒否、通信エラーは、いずれも「ない」(エラーは返さない)。
-        let response = tokio::time::timeout(probe_timeout, fetcher.fetch(Method::Head, &url))
-            .await
-            .ok()?
-            .ok()?;
+        let response = tokio::time::timeout(
+            probe_timeout,
+            fetcher.fetch_as(Method::Head, &url, user_agent),
+        )
+        .await
+        .ok()?
+        .ok()?;
         let kind = probe_kind(&response, path)?;
         Some(FeedInfo {
             title: format!("{netloc} - {}", kind.label()),

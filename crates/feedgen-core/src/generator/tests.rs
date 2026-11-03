@@ -457,3 +457,15 @@ async fn refused_and_invalid_urls_are_unsafe_url_errors_and_never_connect() {
         "拒否した相手に接続してはいけない"
     );
 }
+
+// ---- 本番の入口 (実際の名前解決) ----
+
+#[tokio::test]
+async fn production_generator_refuses_localhost_via_real_resolution() {
+    // 本番用の FeedGenerator::new() は、許可アドレスを持たず、localhost (ループバック) を拒否する。
+    // 名前解決は localhost だけを使う (外部ネットワークに依存しない)。
+    let result = FeedGenerator::new()
+        .generate("http://localhost/", &GenerateOptions::default(), now())
+        .await;
+    assert!(matches!(result, Err(FeedError::UnsafeUrl(_))), "{result:?}");
+}

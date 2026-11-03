@@ -8,6 +8,7 @@ description = "URL から RSS 2.0 フィードを生成するコアライブラ�
 
 [dependencies]
 chrono = { version = "0.4.45", default-features = false, features = ["std"] }
+encoding_rs = "0.8.44"
 futures-util = { version = "0.3.34", default-features = false, features = ["alloc"] }
 html5ever = "0.40"
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls"] }

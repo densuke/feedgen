@@ -4,6 +4,7 @@
 //! ルート要素の名前だけを見る。
 
 use super::RootKind;
+use crate::charset::charset_param;
 
 /// 走査する先頭のバイト数。
 const SCAN_LIMIT: usize = 64 * 1024;
@@ -48,23 +49,10 @@ pub(super) fn proxied_content_type(root: RootKind, original: &str) -> String {
         RootKind::Rss | RootKind::Rdf => "application/rss+xml",
         RootKind::Atom => "application/atom+xml",
     };
-    match charset_of(original) {
+    match charset_param(original) {
         Some(charset) => format!("{media_type}; charset={charset}"),
         None => media_type.to_string(),
     }
-}
-
-fn charset_of(content_type: &str) -> Option<&str> {
-    content_type
-        .split(';')
-        .skip(1)
-        .find_map(|parameter| {
-            let (name, value) = parameter.split_once('=')?;
-            name.trim()
-                .eq_ignore_ascii_case("charset")
-                .then(|| value.trim().trim_matches('"'))
-        })
-        .filter(|value| !value.is_empty())
 }
 
 fn trim_ascii_start(bytes: &[u8]) -> &[u8] {

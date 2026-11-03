@@ -11,7 +11,7 @@ use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant};
 
-use reqwest::header::{ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_TYPE, LOCATION};
+use reqwest::header::{ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_TYPE, LOCATION, USER_AGENT};
 use url::{Host, Url};
 
 use crate::error::{FeedError, Result};
@@ -153,7 +153,7 @@ impl<L: Lookup> SafeFetcher<L> {
     }
 
     /// 検査を通した上で、`User-Agent` を指定して取得する (S-1〜S-8、S-12)。
-    pub async fn fetch_as(&self, method: Method, url: &str, _user_agent: &str) -> Result<Fetched> {
+    pub async fn fetch_as(&self, method: Method, url: &str, user_agent: &str) -> Result<Fetched> {
         let deadline = Instant::now() + self.limits.total_timeout;
         let mut current = check_url(url)?;
 
@@ -171,7 +171,9 @@ impl<L: Lookup> SafeFetcher<L> {
             if remaining.is_zero() {
                 return Err(http_error("応答に時間がかかりすぎています"));
             }
-            let hop = self.send_once(method, &current, &addrs, remaining).await?;
+            let hop = self
+                .send_once(method, &current, &addrs, remaining, user_agent)
+                .await?;
 
             let Some(location) = hop.location else {
                 return Ok(Fetched {
@@ -229,6 +231,7 @@ impl<L: Lookup> SafeFetcher<L> {
         url: &Url,
         addrs: &[IpAddr],
         remaining: Duration,
+        user_agent: &str,
     ) -> Result<Hop> {
         let mut builder = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
@@ -251,6 +254,7 @@ impl<L: Lookup> SafeFetcher<L> {
         let mut response = client
             .request(verb, url.clone())
             .header(ACCEPT_ENCODING, "identity")
+            .header(USER_AGENT, user_agent)
             .send()
             .await
             .map_err(|e| request_error(&e))?;

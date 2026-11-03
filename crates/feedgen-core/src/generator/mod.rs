@@ -1,13 +1,19 @@
 //! フィード生成のパイプライン (docs/specs/pipeline.md)。
 //!
-//! RED 段階のスタブ。実装は仕様 G-1〜G-11 に従って後続のコミットで書く。
+//! 処理の順序 (G-2): 対象の URL を 1 回だけ取得し、フィードそのものならそのまま返し、HTML なら、
+//! (フラグがあれば) 既存フィードを検出して代理取得し、できなければ HTML を解析して生成する。
+//! 現在時刻は呼び出し側から受け取り、このモジュールは時計を読まない (G-4)。
 
 use chrono::{DateTime, FixedOffset};
 
-use crate::detector::FeedInfo;
-use crate::error::Result;
-use crate::fetch::{Lookup, SafeFetcher, SystemLookup};
+use crate::charset::decode_html;
+use crate::detector::{
+    FeedInfo, detect_from_html, feed_root, probe_common_paths, proxied_content_type,
+};
+use crate::error::{FeedError, Result};
+use crate::fetch::{Fetched, Lookup, Method, SafeFetcher, SystemLookup};
 use crate::models::RssFeed;
+use crate::parser::parse;
 
 /// `generate` のオプション (G-1)。`max_items` の範囲 (1〜100) の検証は、API 層で行う。
 #[derive(Debug, Clone)]
@@ -47,7 +53,6 @@ pub enum Outcome {
 
 /// フィード生成のパイプライン。`SafeFetcher` を 1 つ持つ。
 pub struct FeedGenerator<L: Lookup = SystemLookup> {
-    #[allow(dead_code)]
     fetcher: SafeFetcher<L>,
 }
 
@@ -76,11 +81,98 @@ impl<L: Lookup> FeedGenerator<L> {
     /// URL からフィードを生成する (G-1、G-2)。現在時刻は、引数で受け取る (G-4)。
     pub async fn generate(
         &self,
-        _url: &str,
-        _options: &GenerateOptions,
-        _now: DateTime<FixedOffset>,
+        url: &str,
+        options: &GenerateOptions,
+        now: DateTime<FixedOffset>,
     ) -> Result<Outcome> {
-        todo!("G-1〜G-11")
+        let user_agent = options.user_agent.as_str();
+
+        // 1. 対象の URL を、1 回だけ取得する。以後、この本文を使い回す。
+        let page = self.fetcher.fetch_as(Method::Get, url, user_agent).await?;
+        require_ok(&page)?;
+
+        // 3. URL 自体がフィードなら、フラグにかかわらず、そのまま返す (G-7)。
+        if let Some(root) = feed_root(&page.body) {
+            return Ok(Outcome::Proxied {
+                content_type: proxied_content_type(root, &page.content_type),
+                source_url: page.final_url.to_string(),
+                body: page.body,
+            });
+        }
+
+        // 4. HTML を文字列にする (G-9)。
+        let html = decode_html(&page.body, &page.content_type);
+
+        // 5〜7. 既存フィードの検出と代理取得 (G-2、G-11)。失敗は、HTML の解析に進む。
+        let mut detected = Vec::new();
+        if options.use_feed || options.feed_first {
+            detected = self
+                .detect(&html, page.final_url.as_str(), user_agent)
+                .await;
+            if options.use_feed
+                && let Some(proxied) = self.proxy_first(&detected, user_agent).await
+            {
+                return Ok(proxied);
+            }
+        }
+
+        // 8. HTML を解析して生成する。基準 URL は、渡された URL (guid を変えないため。G-2)。
+        let (metadata, items) = parse(&html, url, options.max_items, now);
+        Ok(Outcome::Generated {
+            feed: RssFeed {
+                title: metadata.title,
+                description: metadata.description,
+                link: metadata.link,
+                items,
+            },
+            detected: if options.feed_first {
+                detected
+            } else {
+                Vec::new()
+            },
+        })
+    }
+
+    /// HTML の `<link>` から候補を探し、なければ共通パスを確かめる。基準は最終 URL (G-2)。
+    async fn detect(&self, html: &str, final_url: &str, user_agent: &str) -> Vec<FeedInfo> {
+        let mut found = detect_from_html(html, final_url);
+        if found.is_empty()
+            && let Some(info) = probe_common_paths(&self.fetcher, final_url, user_agent).await
+        {
+            found.push(info);
+        }
+        found
+    }
+
+    /// 候補の先頭を取得し、フィードとして使えれば `Proxied` にする。使えなければ `None`。
+    async fn proxy_first(&self, detected: &[FeedInfo], user_agent: &str) -> Option<Outcome> {
+        let first = detected.first()?;
+        let feed = self
+            .fetcher
+            .fetch_as(Method::Get, &first.url, user_agent)
+            .await
+            .ok()?;
+        if feed.status != 200 {
+            return None;
+        }
+        let root = feed_root(&feed.body)?;
+        Some(Outcome::Proxied {
+            content_type: proxied_content_type(root, &feed.content_type),
+            source_url: first.url.clone(),
+            body: feed.body,
+        })
+    }
+}
+
+/// ステータスが 200 のときだけ成功とする (G-8)。
+fn require_ok(page: &Fetched) -> Result<()> {
+    if page.status == 200 {
+        Ok(())
+    } else {
+        Err(FeedError::Http(format!(
+            "取得先が内容を返しませんでした (HTTP {})",
+            page.status
+        )))
     }
 }
 
