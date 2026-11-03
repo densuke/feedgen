@@ -159,6 +159,39 @@ fn urls_are_resolved_with_join_and_non_http_schemes_become_no_link() {
     assert_eq!(got, expected);
 }
 
+// ---- 既知の差 (docs/specs/parser.md 6 章): Python 版との違いを固定する特性テスト ----
+// Python 版 (BeautifulSoup の html.parser) と HTML5 の解析 (html5ever) の違い。受け入れた差で、
+// scraper を更新して挙動が変わったときに気づけるよう、現在の挙動を固定している。
+
+#[test]
+fn known_difference_unknown_entity_keeps_its_semicolon() {
+    // Python 版は "&unknown" (`;` が落ちる)。
+    let items = run(r#"<h2><a href="/a">A &unknown; B</a></h2>"#).1;
+    assert_eq!(items[0].title, "A &unknown; B");
+}
+
+#[test]
+fn known_difference_cdata_content_is_dropped() {
+    // Python 版は "AxB" (CDATA の中身が文字列に入る)。HTML5 ではコメント扱い。
+    let items = run(r#"<h2><a href="/a">A<![CDATA[x]]>B</a></h2>"#).1;
+    assert_eq!(items[0].title, "AB");
+}
+
+#[test]
+fn known_difference_unclosed_paragraphs_are_not_nested() {
+    // Python 版は <p> が入れ子になり、重なった記事を 5 件出す。HTML5 では <p> が自動で閉じ、3 件。
+    let html = r#"<html><head><title>T</title></head><body><div><p>one<div>two <a href="/x">link text here that is long enough 123456</a></div>three</p><p>four<p>five long paragraph text that is sufficiently long to count <a href="/y">y</a></div></body></html>"#;
+    let items = run(html).1;
+    let titles: Vec<&str> = items.iter().map(|i| i.title.as_str()).collect();
+    assert_eq!(items.len(), 3, "{titles:?}");
+    assert!(titles[0].starts_with("onetwo link text here"), "{titles:?}");
+    assert_eq!(titles[1], "two link text here that is long enough 123456");
+    assert!(
+        titles[2].starts_with("five long paragraph text"),
+        "{titles:?}"
+    );
+}
+
 // ---- P-1: 壊れた入力でも panic しない (Result を返さない) ----
 
 #[test]
