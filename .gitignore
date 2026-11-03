@@ -33,3 +33,6 @@ uv.lock
 
 # Rust
 target/
+
+# 実サイトのフィクスチャ (他人のサイトの本文なのでコミットしない。docs/specs/parser.md 5 章)
+crates/feedgen-core/tests/fixtures/real/
