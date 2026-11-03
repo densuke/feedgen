@@ -10,8 +10,8 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 TARGET=x86_64-unknown-linux-musl
 
 WORK=$(mktemp -d) || die "作業ディレクトリを作れません"
-# trap から呼ばれる。
-# shellcheck disable=SC2329
+# trap から呼ばれる (shellcheck の版により、指摘が SC2317 か SC2329 になる)。
+# shellcheck disable=SC2317,SC2329
 cleanup() {
   rm -rf "$WORK"
   rm -f "$INSTALL_DIR"/.*.new
