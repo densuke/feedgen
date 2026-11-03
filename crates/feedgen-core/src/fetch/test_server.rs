@@ -87,7 +87,13 @@ async fn handle(mut stream: TcpStream, port: u16) {
         "/ok" if method == "HEAD" => {
             send(&mut stream, "200 OK", &["Content-Length: 5"], b"").await;
         }
-        "/ok" => send(&mut stream, "200 OK", &["Content-Length: 5"], b"hello").await,
+        "/ok" => {
+            let headers = [
+                "Content-Type: text/plain; charset=utf-8",
+                "Content-Length: 5",
+            ];
+            send(&mut stream, "200 OK", &headers, b"hello").await;
+        }
         "/echo-ae" => {
             let len = format!("Content-Length: {}", accept_encoding.len());
             send(&mut stream, "200 OK", &[&len], accept_encoding.as_bytes()).await;

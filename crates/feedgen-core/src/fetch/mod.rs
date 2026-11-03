@@ -11,7 +11,7 @@ use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant};
 
-use reqwest::header::{ACCEPT_ENCODING, CONTENT_ENCODING, LOCATION};
+use reqwest::header::{ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_TYPE, LOCATION};
 use url::{Host, Url};
 
 use crate::error::{FeedError, Result};
@@ -93,6 +93,8 @@ pub enum Method {
 #[derive(Debug)]
 pub struct Fetched {
     pub status: u16,
+    /// `Content-Type` ヘッダの値をそのまま。ヘッダがなければ空文字列。
+    pub content_type: String,
     pub body: Vec<u8>,
     pub final_url: Url,
 }
@@ -101,6 +103,7 @@ pub struct Fetched {
 struct Hop {
     status: u16,
     location: Option<String>,
+    content_type: String,
     body: Vec<u8>,
 }
 
@@ -166,6 +169,7 @@ impl<L: Lookup> SafeFetcher<L> {
             let Some(location) = hop.location else {
                 return Ok(Fetched {
                     status: hop.status,
+                    content_type: hop.content_type,
                     body: hop.body,
                     final_url: current,
                 });
@@ -254,9 +258,17 @@ impl<L: Lookup> SafeFetcher<L> {
             return Ok(Hop {
                 status,
                 location: Some(location.to_string()),
+                content_type: String::new(),
                 body: Vec::new(),
             });
         }
+
+        let content_type = response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("")
+            .to_string();
 
         // ヘッダが複数あるときも全件を見る。1 つでも identity 以外なら拒否する (S-7)。
         let unsupported_encoding =
@@ -291,6 +303,7 @@ impl<L: Lookup> SafeFetcher<L> {
         Ok(Hop {
             status,
             location: None,
+            content_type,
             body,
         })
     }

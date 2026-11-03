@@ -280,6 +280,13 @@ async fn fetch_basics_over_pinned_resolution() {
     assert_eq!(ok.status, 200);
     assert_eq!(ok.body, b"hello");
     assert_eq!(ok.final_url.path(), "/ok");
+    // Content-Type を、そのまま (小文字化せず) 返す。ヘッダがなければ空文字列。
+    assert_eq!(ok.content_type, "text/plain; charset=utf-8");
+    let no_header = fetcher
+        .fetch(Method::Get, &url_of(&server, "/chunked"))
+        .await
+        .unwrap();
+    assert_eq!(no_header.content_type, "");
 
     // Accept-Encoding: identity を送る (S-7)
     let echo = fetcher
