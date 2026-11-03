@@ -15,7 +15,8 @@
 ## 2. 前提
 
 - 配備先は e2 (Ubuntu 24.04、x86_64、メモリ 1GB)。そこではビルドしない。
-- 本番の入口は Caddy。Rust 版は `127.0.0.1:8001` で `feedgen-rs.service` として動き、Python 版 (`feedgen.service`、8000) は待機している (置き換えの判断までは残す)。
+- 本番の入口は Caddy。Rust 版は `127.0.0.1:8001` で `feedgen-rs.service` として動く。
+- **Python 版はフェードアウトし、今後は Rust 版のみを保守・配備する** (2026-11-03 の方針。理由: e2 では Python が重い)。Python 版 (`feedgen.service`、8000) は、Rust 版の経過確認が済むまで待機し、済んだら停止する。停止後の猶予期間 (2 週間) だけ、ロールバック先として残す。
 - 配布物は GitHub のリリース (公開) から、認証なしで取得する。非公開にする場合は、取得にトークンが要る (R-8 の注記)。
 
 ## 3. 要件 (EARS)
@@ -89,8 +90,16 @@
 
 ## 4. 手動での戻し方
 
-- 直前の版に戻す: `~/work/feedgen-rs/rollback-binary.sh` (`.prev` を戻して再起動し、`/health` を確かめる)。
-- Python 版へ戻す: 既存の `rollback.sh` (Caddy の転送先を、`Caddyfile` のバックアップから戻す)。
+- 直前の版に戻す: `~/work/feedgen-rs/rollback-binary.sh` (`.prev` を戻して再起動し、`/health` を確かめる)。**恒久的な手段**。
+- Python 版へ戻す (**猶予期間のみ**): 既存の `rollback.sh`。Python 版を停止したあとでも使えるよう、先に `feedgen.service` を起動し、起動を待ってから、Caddy の転送先を、`Caddyfile` のバックアップから戻す内容にする。猶予期間が過ぎ、Python 版を片づけたあとは、この手段を廃止する。
+
+### フェードアウトの段取り
+
+| 時期 | 内容 |
+|---|---|
+| Rust 版の経過確認が「問題なし」になったとき | e2 の `feedgen.service` を `disable --now` で止める (ユニットとリポジトリは消さない)。8000 番の開放も、これで解消する。 |
+| 停止から 2 週間、異常がないとき | e2 の Python 版を片づける (`.venv`、`~/work/feedgen`、systemd のユニット、Caddy の `/docs` 規則)。`rollback.sh` の Python 版への復帰を廃止する。 |
+| main へのマージ時 | リポジトリの Python 側 (`feedgen/`、`tests/`、`pyproject.toml`、`uv.lock`、`Dockerfile`、`compose.yml`) の削除を、別のブランチとコミットで行う。ワークフローの追加などと混ぜない。 |
 
 ## 5. テスト方針
 
@@ -105,7 +114,8 @@
 
 ## 6. Python 版との差・既存への影響
 
-- Python の Dockerfile、`compose.yml` は、今回は触らない (Rust 版の配布は、Docker を使わない)。
+- **Python 側は保守しない**。機能の追加も、依存の更新 (uv、`pyproject.toml`) も、行わない。Dependabot の対象は、cargo と GitHub Actions のみ (R-4)。
+- Python の Dockerfile、`compose.yml` は、今回は触らない (Rust 版の配布は、Docker を使わない)。削除は、上のフェードアウトの段取りで、別に行う。
 - 既存の Python 側のテストと CI は、存在しない (`.github` がない)。
 
 ## 7. 未決事項 (推奨つき)
