@@ -307,3 +307,25 @@ async fn generate_url_can_write_to_a_file() {
             .starts_with("https://a.example/feed?url=")
     );
 }
+
+#[tokio::test]
+async fn feed_first_title_has_control_characters_removed() {
+    let dir = empty_dir();
+    let source = Fake::new(|| {
+        feed(vec![FeedInfo {
+            url: "https://example.com/atom.xml".to_string(),
+            title: "a\u{1b}[31mred\r\nsecond line\u{7}".to_string(),
+            kind: FeedKind::Atom,
+        }])
+    });
+    let report = run(&args(&["--feed-first"]), dir.path(), &source, now()).await;
+    assert_eq!(report.exit_code, 0);
+    assert!(
+        !report.stderr.chars().any(|c| c.is_control() && c != '\n'),
+        "{:?}",
+        report.stderr
+    );
+    let lines: Vec<&str> = report.stderr.lines().collect();
+    assert_eq!(lines.len(), 1, "タイトルの改行で行が増えない: {lines:?}");
+    assert!(lines[0].ends_with("(a[31mredsecond line)"), "{lines:?}");
+}
