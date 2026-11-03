@@ -10,7 +10,10 @@ mod text;
 use std::collections::HashSet;
 
 use chrono::{DateTime, FixedOffset};
-use scraper::Html;
+use html5ever::driver::{self, ParseOpts};
+use html5ever::tendril::TendrilSink;
+use html5ever::tree_builder::TreeBuilderOpts;
+use scraper::{Html, HtmlTreeSink};
 
 use crate::models::RssItem;
 use strategies::Strategies;
@@ -33,7 +36,7 @@ pub fn parse(
     max_items: usize,
     now: DateTime<FixedOffset>,
 ) -> (Metadata, Vec<RssItem>) {
-    let document = Html::parse_document(html);
+    let document = parse_document(html);
     let metadata = metadata(&document, base_url);
 
     let strategies = Strategies {
@@ -49,6 +52,21 @@ pub fn parse(
         items.extend(strategies.blocks(max_items - items.len()));
     }
     (metadata, deduplicate(items, max_items))
+}
+
+/// スクリプト無効で解析する (P-1)。
+///
+/// `scraper::Html::parse_document` は既定のオプション (スクリプト有効) で解析し、`<noscript>` の中身を
+/// 生の文字列にしてしまう。無効にすると、中身が通常の要素として解析される (Python 版と同じ)。
+fn parse_document(html: &str) -> Html {
+    let options = ParseOpts {
+        tree_builder: TreeBuilderOpts {
+            scripting_enabled: false,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    driver::parse_document(HtmlTreeSink::new(Html::new_document()), options).one(html)
 }
 
 /// タイトルと説明 (P-3)。

@@ -6,7 +6,17 @@ use scraper::{ElementRef, Html, Node, Selector};
 const EXCLUDED: [&str; 5] = ["script", "style", "template", "rt", "rp"];
 
 /// 子孫のテキストを区切りなしで連結する。`EXCLUDED` の中身とコメントは含めない (P-2)。
+///
+/// `element` 自身が `EXCLUDED` の内側にある (祖先に `EXCLUDED` の要素がある) ときは空文字列。
+/// BeautifulSoup は、これらの内側にある文字列を入れ子の深さにかかわらず除外するため。
 pub(super) fn text_of(element: ElementRef) -> String {
+    let inside_excluded = element
+        .ancestors()
+        .filter_map(ElementRef::wrap)
+        .any(|ancestor| EXCLUDED.contains(&ancestor.value().name()));
+    if inside_excluded {
+        return String::new();
+    }
     let mut out = String::new();
     push_text(element, &mut out);
     out

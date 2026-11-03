@@ -49,7 +49,7 @@ impl Strategies<'_> {
         for (number, heading) in self
             .document
             .select(&selector)
-            .take(max_items * 2)
+            .take(max_items.saturating_mul(2))
             .enumerate()
         {
             if items.len() >= max_items {
@@ -75,7 +75,11 @@ impl Strategies<'_> {
             if items.len() >= remaining {
                 break;
             }
-            for card in self.document.select(&selector(css)).take(remaining * 2) {
+            for card in self
+                .document
+                .select(&selector(css))
+                .take(remaining.saturating_mul(2))
+            {
                 if items.len() >= remaining {
                     break;
                 }
@@ -106,7 +110,7 @@ impl Strategies<'_> {
         for (number, block) in self
             .document
             .select(&selector("p, div"))
-            .take(remaining * 3)
+            .take(remaining.saturating_mul(3))
             .enumerate()
         {
             if items.len() >= remaining {
