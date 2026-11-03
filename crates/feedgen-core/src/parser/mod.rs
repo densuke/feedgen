@@ -58,7 +58,7 @@ pub fn parse(
 ///
 /// `scraper::Html::parse_document` は既定のオプション (スクリプト有効) で解析し、`<noscript>` の中身を
 /// 生の文字列にしてしまう。無効にすると、中身が通常の要素として解析される (Python 版と同じ)。
-fn parse_document(html: &str) -> Html {
+pub(crate) fn parse_document(html: &str) -> Html {
     let options = ParseOpts {
         tree_builder: TreeBuilderOpts {
             scripting_enabled: false,
