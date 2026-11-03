@@ -1,0 +1,27 @@
+# Dependabot 設定 (docs/specs/release.md R-4)
+# Rust 版の依存 (cargo) と GitHub Actions を、毎週月曜 9:00 (JST) に確認する。
+# Python 側 (uv、pyproject.toml) は保守しないため、対象にしない。
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Tokyo"
+    open-pull-requests-limit: 5
+    labels: ["dependencies"]
+    commit-message:
+      prefix: "deps"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Tokyo"
+    open-pull-requests-limit: 5
+    labels: ["dependencies"]
+    commit-message:
+      prefix: "ci"

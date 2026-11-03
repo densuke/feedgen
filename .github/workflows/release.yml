@@ -1,0 +1,170 @@
+name: ビルドとリリース
+
+# main への push で、Linux 向けの静的バイナリ (feedgen-server と feedgen) をビルドし、
+# ローリングの `latest` (プレリリース) を常に更新する。ワークスペースの版 (Cargo.toml) に対応する
+# タグ v<版> がまだなければ、その版のタグ付きリリースも作る。e2 の update.sh は、
+# 最新の「プレリリースでない」リリース (= タグ付きリリース) を取得する (docs/specs/release.md R-2, R-3, R-5)。
+# Dependabot の cargo 更新 (コミットメッセージが deps で始まる) が入り、現在の版のタグが
+# すでにあるときは、patch を 1 つ上げて新しい版にする。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# 複数の依存更新が続けてマージされても、リリースを直列に処理する (patch の bump の push が競合しないため)。
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+env:
+  TARGET: x86_64-unknown-linux-musl
+
+jobs:
+  # 版の判定と、依存更新のときの patch の自動更新
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.decide.outputs.version }}
+      sha: ${{ steps.decide.outputs.sha }}
+      new_tag: ${{ steps.decide.outputs.new_tag }}
+    steps:
+      - name: ソースの取得
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Rustツールチェインのセットアップ
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 版の判定と patch の自動更新
+        id: decide
+        run: |
+          set -euo pipefail
+          version=$(grep -E '^version' Cargo.toml | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+          msg=$(git log -1 --pretty=%s)
+          echo "現在の版: $version / 先頭のコミット: $msg"
+
+          if git rev-parse "v$version" >/dev/null 2>&1; then tag_exists=true; else tag_exists=false; fi
+
+          # cargo の依存更新 (接頭辞 deps) で、現在の版のタグがすでにあるときは、patch を 1 つ上げる。
+          # Actions の更新 (接頭辞 ci) は、バイナリに影響しないので対象外。
+          if [ "$tag_exists" = "true" ] && printf '%s' "$msg" | grep -qE '^deps(\(|:| )'; then
+            new=$(bash deploy/next-patch.sh "$version")
+            echo "依存更新を検知。版を $version -> $new に更新します"
+            perl -0777 -pi -e "s/^version = \"[^\"]+\"/version = \"$new\"/m" Cargo.toml
+            cargo update --workspace
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add Cargo.toml Cargo.lock
+            git commit -m "[chore] 版を $new に更新 (依存更新に伴う自動 patch) [skip ci]"
+            git push origin HEAD:main
+            version="$new"
+            tag_exists=false
+          fi
+
+          sha=$(git rev-parse HEAD)
+          if [ "$tag_exists" = "true" ]; then new_tag=false; else new_tag=true; fi
+          {
+            echo "version=$version"
+            echo "sha=$sha"
+            echo "new_tag=$new_tag"
+          } >> "$GITHUB_OUTPUT"
+          echo "確定: version=$version new_tag=$new_tag sha=$sha"
+
+  # ビルドと、配布用アーカイブの作成
+  build:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    steps:
+      - name: ソースの取得 (確定したコミット)
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - name: Rustツールチェインのセットアップ
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ env.TARGET }}
+
+      - name: musl のツールの導入
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: ビルドキャッシュ
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ env.TARGET }}
+
+      - name: ビルド
+        env:
+          CC_x86_64_unknown_linux_musl: musl-gcc
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+        run: cargo build --release --target "$TARGET" -p feedgen-server -p feedgen-cli
+
+      - name: 配布用アーカイブの作成
+        run: |
+          set -euo pipefail
+          version="${{ needs.prepare.outputs.version }}"
+          rm -rf dist && mkdir -p dist/stage
+          cp "target/$TARGET/release/feedgen-server" "target/$TARGET/release/feedgen" dist/stage/
+          strip dist/stage/feedgen-server dist/stage/feedgen
+          name="feedgen-$TARGET-$version.tar.gz"
+          # アーカイブの中身は、この 2 つのバイナリだけ。update.sh は、この 2 つだけを許す。
+          tar -czf "dist/$name" -C dist/stage feedgen feedgen-server
+          (cd dist && sha256sum "$name" > "$name.sha256")
+          tar -tzf "dist/$name"
+
+      - name: アーティファクトのアップロード
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+
+  # ローリングの latest の更新と、版が上がったときのタグ付きリリース
+  release:
+    needs: [prepare, build]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: アーティファクトの取得
+        uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: artifacts
+
+      - name: 収集物の確認
+        run: ls -lh artifacts
+
+      - name: ローリング latest リリースの更新
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          sha="${{ needs.prepare.outputs.sha }}"
+          # 既存の latest を、タグごと削除して作り直し、常に最新のビルドを指す。
+          gh release delete latest --yes --cleanup-tag --repo "$GITHUB_REPOSITORY" || true
+          gh release create latest \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$sha" \
+            --prerelease \
+            --title "latest (rolling)" \
+            --notes "main の最新のビルド (commit ${sha})。恒久的な版は、タグ付きリリースを使う。" \
+            artifacts/*.tar.gz artifacts/*.tar.gz.sha256
+
+      - name: タグ付きリリースの作成 (版が上がったとき)
+        if: ${{ needs.prepare.outputs.new_tag == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          version="${{ needs.prepare.outputs.version }}"
+          sha="${{ needs.prepare.outputs.sha }}"
+          gh release create "v$version" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$sha" \
+            --title "v$version" \
+            --notes "feedgen v$version" \
+            artifacts/*.tar.gz artifacts/*.tar.gz.sha256

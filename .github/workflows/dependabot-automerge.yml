@@ -1,0 +1,51 @@
+name: dependabot 自動マージ
+
+# Dependabot の依存更新 PR について、cargo test が通れば自動でマージする (major 更新は除く)。
+# GITHUB_TOKEN によるマージの push は release.yml を起動しない (GitHub の再帰防止) ため、
+# マージ後に release.yml を明示的に workflow_dispatch で起動する (docs/specs/release.md R-4)。
+on:
+  pull_request_target:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+jobs:
+  automerge:
+    if: ${{ github.actor == 'dependabot[bot]' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Dependabot のメタデータ取得
+        id: meta
+        uses: dependabot/fetch-metadata@v3
+
+      # Dependabot の PR は同一リポジトリ内のブランチから作られ、fork ではない。
+      # fork からの PR をここで扱うようにする場合は、checkout の制限 (allow-unsafe-pr-checkout) を思い出すこと。
+      - name: ソースの取得 (PR の head)
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Rustツールチェインのセットアップ
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: ビルドキャッシュ
+        uses: Swatinem/rust-cache@v2
+
+      - name: テスト
+        run: cargo test --workspace
+
+      - name: 自動マージ (major 更新以外)
+        id: merge
+        if: ${{ steps.meta.outputs.update-type != 'version-update:semver-major' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr merge --squash --delete-branch "${{ github.event.pull_request.html_url }}"
+
+      - name: リリースの起動 (マージ成功時)
+        if: ${{ steps.merge.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run release.yml --ref main
