@@ -75,13 +75,17 @@ async fn handle(mut stream: TcpStream, port: u16) {
     let mut first = lines.next().unwrap_or("").split(' ');
     let method = first.next().unwrap_or("");
     let path = first.next().unwrap_or("/");
-    let accept_encoding = lines
-        .find_map(|line| {
-            line.to_ascii_lowercase()
-                .strip_prefix("accept-encoding:")
-                .map(|v| v.trim().to_string())
-        })
-        .unwrap_or_default();
+    let headers: Vec<&str> = lines.collect();
+    let header = |name: &str| -> String {
+        headers
+            .iter()
+            .filter_map(|line| line.split_once(':'))
+            .find(|(key, _)| key.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.trim().to_string())
+            .unwrap_or_default()
+    };
+    let accept_encoding = header("accept-encoding");
+    let user_agent = header("user-agent");
 
     match path {
         "/ok" if method == "HEAD" => {
@@ -97,6 +101,11 @@ async fn handle(mut stream: TcpStream, port: u16) {
         "/echo-ae" => {
             let len = format!("Content-Length: {}", accept_encoding.len());
             send(&mut stream, "200 OK", &[&len], accept_encoding.as_bytes()).await;
+        }
+        // 受けた User-Agent をそのまま本文で返す。
+        "/echo-ua" => {
+            let len = format!("Content-Length: {}", user_agent.len());
+            send(&mut stream, "200 OK", &[&len], user_agent.as_bytes()).await;
         }
         "/gzip" => {
             let headers = ["Content-Encoding: gzip", "Content-Length: 5"];

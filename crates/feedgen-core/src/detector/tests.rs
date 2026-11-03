@@ -12,6 +12,7 @@ use super::*;
 use crate::fetch::{Limits, Lookup, SafeFetcher};
 
 const BASE: &str = "https://example.com/blog/post.html";
+const UA: &str = "test-agent/1.0";
 
 // ---- D-1、D-2: HTML の <link> ----
 
@@ -416,7 +417,7 @@ async fn html_responses_are_skipped_and_the_first_feed_wins() {
     ])
     .await;
 
-    let info = probe_common_paths(&lenient(), &site(&server, "/")).await;
+    let info = probe_common_paths(&lenient(), &site(&server, "/"), UA).await;
     assert_eq!(
         found_at(&server, info),
         Some(("/rss".to_string(), title(&server, "RSS"), "RSS"))
@@ -433,7 +434,7 @@ async fn earlier_path_wins_even_when_a_later_one_is_also_a_feed() {
     ])
     .await;
 
-    let info = probe_common_paths(&lenient(), &site(&server, "/")).await;
+    let info = probe_common_paths(&lenient(), &site(&server, "/"), UA).await;
     // /feed は application/xml なので、パスで補って RSS
     assert_eq!(
         found_at(&server, info),
@@ -454,7 +455,7 @@ async fn kind_follows_the_content_type_then_the_path() {
     ];
     for (path, content_type, label) in cases {
         let server = probe_server::spawn(vec![Route::new(path, 200, content_type)]).await;
-        let info = probe_common_paths(&lenient(), &site(&server, "/")).await;
+        let info = probe_common_paths(&lenient(), &site(&server, "/"), UA).await;
         assert_eq!(
             found_at(&server, info),
             Some((path.to_string(), title(&server, label), label)),
@@ -486,7 +487,7 @@ async fn unsuitable_responses_are_not_feeds() {
     ];
     for (label, status, content_type) in cases {
         let server = probe_server::spawn(vec![Route::new("/feed", status, content_type)]).await;
-        let info = probe_common_paths(&lenient(), &site(&server, "/")).await;
+        let info = probe_common_paths(&lenient(), &site(&server, "/"), UA).await;
         assert_eq!(info, None, "{label}");
     }
 }
@@ -495,7 +496,7 @@ async fn unsuitable_responses_are_not_feeds() {
 async fn the_site_root_is_probed_not_the_page_path() {
     let server = probe_server::spawn(vec![]).await;
 
-    let info = probe_common_paths(&lenient(), &site(&server, "/deep/path/page.html?x=1")).await;
+    let info = probe_common_paths(&lenient(), &site(&server, "/deep/path/page.html?x=1"), UA).await;
     assert_eq!(info, None);
 
     let mut requests = server.requests();
@@ -537,7 +538,7 @@ async fn probes_run_in_parallel() {
     let server = probe_server::spawn(routes).await;
 
     let started = Instant::now();
-    let info = probe_common_paths(&lenient(), &site(&server, "/")).await;
+    let info = probe_common_paths(&lenient(), &site(&server, "/"), UA).await;
     let elapsed = started.elapsed();
 
     assert_eq!(
@@ -557,8 +558,13 @@ async fn a_probe_that_exceeds_its_timeout_counts_as_missing() {
     .await;
 
     let started = Instant::now();
-    let info =
-        probe_common_paths_with(&lenient(), &site(&server, "/"), Duration::from_millis(300)).await;
+    let info = probe_common_paths_with(
+        &lenient(),
+        &site(&server, "/"),
+        UA,
+        Duration::from_millis(300),
+    )
+    .await;
     let elapsed = started.elapsed();
 
     assert_eq!(
@@ -582,10 +588,22 @@ async fn refused_targets_are_missing_not_errors_and_never_connected() {
     );
     let server = probe_server::spawn(vec![Route::new("/feed", 200, "application/rss+xml")]).await;
 
-    let info = probe_common_paths(&strict, &site(&server, "/")).await;
+    let info = probe_common_paths(&strict, &site(&server, "/"), UA).await;
     assert_eq!(info, None);
     assert!(
         server.requests().is_empty(),
         "拒否した相手に接続してはいけない"
     );
+}
+
+#[tokio::test]
+async fn the_user_agent_is_sent_on_every_probe() {
+    // pipeline.md G-10。UA のない取得を拒否するサイトがあるため、8 本すべてに付ける。
+    let server = probe_server::spawn(vec![]).await;
+
+    let _ = probe_common_paths(&lenient(), &site(&server, "/"), "my-agent/2.0").await;
+
+    let agents = server.user_agents();
+    assert_eq!(agents.len(), 8);
+    assert!(agents.iter().all(|ua| ua == "my-agent/2.0"), "{agents:?}");
 }

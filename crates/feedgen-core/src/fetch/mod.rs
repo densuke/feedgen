@@ -27,6 +27,8 @@ pub const MAX_REDIRECTS: usize = 5;
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// リダイレクトを含む全体の締切 (S-6)。
 pub const TOTAL_TIMEOUT: Duration = Duration::from_secs(45);
+/// `User-Agent` を指定しないときに送る値 (S-12)。
+pub const DEFAULT_USER_AGENT: &str = "feedgen/1.0";
 /// 内部アドレス・解決失敗・解決結果が空のときに返す共通の文面 (S-9)。
 pub const DENIED: &str = "このアドレスへのアクセスは許可されていません";
 
@@ -145,8 +147,13 @@ impl<L: Lookup> SafeFetcher<L> {
         }
     }
 
-    /// 検査を通した上で取得する (S-1〜S-8)。
+    /// 検査を通した上で取得する。`User-Agent` は既定の `feedgen/1.0` を送る (S-12)。
     pub async fn fetch(&self, method: Method, url: &str) -> Result<Fetched> {
+        self.fetch_as(method, url, DEFAULT_USER_AGENT).await
+    }
+
+    /// 検査を通した上で、`User-Agent` を指定して取得する (S-1〜S-8、S-12)。
+    pub async fn fetch_as(&self, method: Method, url: &str, _user_agent: &str) -> Result<Fetched> {
         let deadline = Instant::now() + self.limits.total_timeout;
         let mut current = check_url(url)?;
 

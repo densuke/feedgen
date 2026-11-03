@@ -571,3 +571,22 @@ fn constants_match_the_spec() {
     assert_eq!(limits.total_timeout, Duration::from_secs(45));
     assert_eq!(MAX_REDIRECTS, 5);
 }
+
+// ---- S-12: User-Agent ----
+
+#[tokio::test]
+async fn user_agent_is_sent_and_defaults_to_feedgen() {
+    let server = test_server::spawn().await;
+    let fetcher = lenient(Limits::default());
+    let url = url_of(&server, "/echo-ua");
+
+    let named = fetcher
+        .fetch_as(Method::Get, &url, "my-agent/1.0")
+        .await
+        .unwrap();
+    assert_eq!(named.body, b"my-agent/1.0");
+
+    // fetch は既定の UA を送る (pipeline.md G-10)
+    let default = fetcher.fetch(Method::Get, &url).await.unwrap();
+    assert_eq!(default.body, b"feedgen/1.0");
+}

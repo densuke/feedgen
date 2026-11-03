@@ -90,14 +90,16 @@ pub fn proxied_content_type(root: RootKind, original: &str) -> String {
 pub async fn probe_common_paths<L: Lookup>(
     fetcher: &SafeFetcher<L>,
     base_url: &str,
+    user_agent: &str,
 ) -> Option<FeedInfo> {
-    probe_common_paths_with(fetcher, base_url, PROBE_TIMEOUT).await
+    probe_common_paths_with(fetcher, base_url, user_agent, PROBE_TIMEOUT).await
 }
 
 /// `probe_common_paths` の、1 本ごとの締切を差し替えられる版 (テスト用)。
 pub(crate) async fn probe_common_paths_with<L: Lookup>(
     fetcher: &SafeFetcher<L>,
     base_url: &str,
+    _user_agent: &str,
     probe_timeout: Duration,
 ) -> Option<FeedInfo> {
     let base = Url::parse(base_url).ok()?;
@@ -174,6 +176,6 @@ fn kind_from_path(path: &str) -> FeedKind {
 }
 
 #[cfg(test)]
-mod probe_server;
+pub(crate) mod probe_server;
 #[cfg(test)]
 mod tests;
