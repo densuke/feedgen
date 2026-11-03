@@ -1,6 +1,6 @@
 use std::process::ExitCode;
 
-use chrono::{FixedOffset, Utc};
+use chrono::Utc;
 use clap::Parser;
 use feedgen_cli::Args;
 use feedgen_cli::run::run;
@@ -16,7 +16,7 @@ async fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let now = Utc::now().with_timezone(&FixedOffset::east_opt(0).expect("UTC"));
+    let now = Utc::now().fixed_offset();
     let report = run(&args, &cwd, &FeedGenerator::new(), now).await;
     eprint!("{}", report.stderr);
     {

@@ -42,8 +42,14 @@ impl Default for GenerateOptions {
 /// `user_agent` が、ヘッダにそのまま入れられる値か確かめる (api.md A-2)。
 /// 可視 ASCII (U+0020〜U+007E) のみ、1〜256 文字。違反は理由の文字列。
 pub fn validate_user_agent(user_agent: &str) -> std::result::Result<(), String> {
-    let _ = user_agent;
-    todo!("api.md A-2")
+    let length = user_agent.chars().count();
+    if !(1..=256).contains(&length) {
+        return Err("user_agent は 1〜256 文字で指定してください".to_string());
+    }
+    if !user_agent.bytes().all(|b| (0x20..=0x7e).contains(&b)) {
+        return Err("user_agent は英数字と記号 (ASCII) のみ指定できます".to_string());
+    }
+    Ok(())
 }
 
 /// `generate` の結果 (G-1)。
