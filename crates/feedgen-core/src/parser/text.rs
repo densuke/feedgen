@@ -5,7 +5,11 @@ use scraper::{ElementRef, Html, Node, Selector};
 /// `get_text()` から外す要素 (Python 版 BeautifulSoup の挙動)。
 const EXCLUDED: [&str; 5] = ["script", "style", "template", "rt", "rp"];
 
+/// 空白をまとめない要素 (BeautifulSoup の `preserve_whitespace_tags`)。
+const PRESERVE_WHITESPACE: [&str; 2] = ["pre", "textarea"];
+
 /// 子孫のテキストを区切りなしで連結する。`EXCLUDED` の中身とコメントは含めない (P-2)。
+/// 空白だけのテキストは、`pre` / `textarea` の中を除き、短くまとめる (2.3)。
 ///
 /// `element` 自身が `EXCLUDED` の内側にある (祖先に `EXCLUDED` の要素がある) ときは空文字列。
 /// BeautifulSoup は、これらの内側にある文字列を入れ子の深さにかかわらず除外するため。
@@ -17,21 +21,42 @@ pub(super) fn text_of(element: ElementRef) -> String {
     if inside_excluded {
         return String::new();
     }
+    // `<pre>` / `<textarea>` の内側かどうか (自身を含む)。内側では空白をまとめない。
+    let preserve = element
+        .ancestors()
+        .filter_map(ElementRef::wrap)
+        .chain(std::iter::once(element))
+        .any(|e| PRESERVE_WHITESPACE.contains(&e.value().name()));
     let mut out = String::new();
-    push_text(element, &mut out);
+    push_text(element, preserve, &mut out);
     out
 }
 
-fn push_text(element: ElementRef, out: &mut String) {
+fn push_text(element: ElementRef, preserve: bool, out: &mut String) {
     for child in element.children() {
         if let Some(child_element) = ElementRef::wrap(child) {
             if !EXCLUDED.contains(&child_element.value().name()) {
-                push_text(child_element, out);
+                let preserve =
+                    preserve || PRESERVE_WHITESPACE.contains(&child_element.value().name());
+                push_text(child_element, preserve, out);
             }
         } else if let Node::Text(text) = child.value() {
-            out.push_str(text);
+            match collapsed_whitespace(text) {
+                Some(collapsed) if !preserve => out.push_str(collapsed),
+                _ => out.push_str(text),
+            }
         }
     }
+}
+
+/// 空白だけのテキストを、`\n` を含めば `\n`、含まなければ `' '` にまとめる (2.3)。
+/// 空白は ASCII の 5 種 (U+0020、U+0009、U+000A、U+000C、U+000D) だけ。NBSP や U+000B は含めない。
+/// 空白だけでなければ `None`。
+fn collapsed_whitespace(text: &str) -> Option<&'static str> {
+    let whitespace_only = text
+        .chars()
+        .all(|c| matches!(c, ' ' | '\t' | '\n' | '\u{c}' | '\r'));
+    whitespace_only.then(|| if text.contains('\n') { "\n" } else { " " })
 }
 
 /// 固定の CSS セレクタを作る。呼び出し側の文字列はすべてこのクレート内の定数で、テストで有効性を確かめる。
