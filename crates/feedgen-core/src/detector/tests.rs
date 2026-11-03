@@ -3,13 +3,10 @@
 //! 軽い判定 (HTML の `<link>`、本文のルート要素、`Content-Type`) は表で総当たりし、
 //! 重いもの (共通パスの確認。ローカルサーバーを使う) は関心ごとにまとめて本数を絞る。
 
-use std::io;
-use std::net::IpAddr;
 use std::time::{Duration, Instant};
 
-use super::probe_server::{self, ProbeServer, Route};
+use super::probe_server::{self, ProbeServer, Route, lenient_fetcher, refusing_fetcher, site_url};
 use super::*;
-use crate::fetch::{Limits, Lookup, SafeFetcher};
 
 const BASE: &str = "https://example.com/blog/post.html";
 const UA: &str = "test-agent/1.0";
@@ -374,27 +371,6 @@ fn proxied_content_type_follows_the_root_and_keeps_the_charset() {
 
 // ---- D-3、D-4: 共通パスの確認 (ローカルサーバー) ----
 
-/// どの名前でも 127.0.0.1 に解決する。
-struct LocalLookup;
-
-impl Lookup for LocalLookup {
-    async fn lookup(&self, _host: &str) -> io::Result<Vec<IpAddr>> {
-        Ok(vec![IpAddr::from([127, 0, 0, 1])])
-    }
-}
-
-fn lenient() -> SafeFetcher<LocalLookup> {
-    SafeFetcher::for_test(
-        LocalLookup,
-        vec![IpAddr::from([127, 0, 0, 1])],
-        Limits::default(),
-    )
-}
-
-fn site(server: &ProbeServer, path: &str) -> String {
-    format!("http://site.test:{}{path}", server.addr.port())
-}
-
 /// (パス, タイトル, 種類) にする。
 fn found_at(
     server: &ProbeServer,
@@ -417,7 +393,7 @@ async fn html_responses_are_skipped_and_the_first_feed_wins() {
     ])
     .await;
 
-    let info = probe_common_paths(&lenient(), &site(&server, "/"), UA).await;
+    let info = probe_common_paths(&lenient_fetcher(), &site_url(&server, "/"), UA).await;
     assert_eq!(
         found_at(&server, info),
         Some(("/rss".to_string(), title(&server, "RSS"), "RSS"))
@@ -434,7 +410,7 @@ async fn earlier_path_wins_even_when_a_later_one_is_also_a_feed() {
     ])
     .await;
 
-    let info = probe_common_paths(&lenient(), &site(&server, "/"), UA).await;
+    let info = probe_common_paths(&lenient_fetcher(), &site_url(&server, "/"), UA).await;
     // /feed は application/xml なので、パスで補って RSS
     assert_eq!(
         found_at(&server, info),
@@ -455,7 +431,7 @@ async fn kind_follows_the_content_type_then_the_path() {
     ];
     for (path, content_type, label) in cases {
         let server = probe_server::spawn(vec![Route::new(path, 200, content_type)]).await;
-        let info = probe_common_paths(&lenient(), &site(&server, "/"), UA).await;
+        let info = probe_common_paths(&lenient_fetcher(), &site_url(&server, "/"), UA).await;
         assert_eq!(
             found_at(&server, info),
             Some((path.to_string(), title(&server, label), label)),
@@ -487,7 +463,7 @@ async fn unsuitable_responses_are_not_feeds() {
     ];
     for (label, status, content_type) in cases {
         let server = probe_server::spawn(vec![Route::new("/feed", status, content_type)]).await;
-        let info = probe_common_paths(&lenient(), &site(&server, "/"), UA).await;
+        let info = probe_common_paths(&lenient_fetcher(), &site_url(&server, "/"), UA).await;
         assert_eq!(info, None, "{label}");
     }
 }
@@ -496,7 +472,12 @@ async fn unsuitable_responses_are_not_feeds() {
 async fn the_site_root_is_probed_not_the_page_path() {
     let server = probe_server::spawn(vec![]).await;
 
-    let info = probe_common_paths(&lenient(), &site(&server, "/deep/path/page.html?x=1"), UA).await;
+    let info = probe_common_paths(
+        &lenient_fetcher(),
+        &site_url(&server, "/deep/path/page.html?x=1"),
+        UA,
+    )
+    .await;
     assert_eq!(info, None);
 
     let mut requests = server.requests();
@@ -538,7 +519,7 @@ async fn probes_run_in_parallel() {
     let server = probe_server::spawn(routes).await;
 
     let started = Instant::now();
-    let info = probe_common_paths(&lenient(), &site(&server, "/"), UA).await;
+    let info = probe_common_paths(&lenient_fetcher(), &site_url(&server, "/"), UA).await;
     let elapsed = started.elapsed();
 
     assert_eq!(
@@ -559,8 +540,8 @@ async fn a_probe_that_exceeds_its_timeout_counts_as_missing() {
 
     let started = Instant::now();
     let info = probe_common_paths_with(
-        &lenient(),
-        &site(&server, "/"),
+        &lenient_fetcher(),
+        &site_url(&server, "/"),
         UA,
         Duration::from_millis(300),
     )
@@ -579,16 +560,12 @@ async fn a_probe_that_exceeds_its_timeout_counts_as_missing() {
 
 #[tokio::test]
 async fn refused_targets_are_missing_not_errors_and_never_connected() {
-    // 許可アドレスが空だと、ポート検査 (80/443 のみ) で先に止まり、IP の検査に届かない。
-    // 別のアドレスだけを許可すると、ポートの制限は外れ、127.0.0.1 は IP の検査で拒否される。
-    let strict = SafeFetcher::for_test(
-        LocalLookup,
-        vec![IpAddr::from([10, 0, 0, 9])],
-        Limits::default(),
-    );
+    // refusing_fetcher は、別のアドレスだけを許可する。ポートの制限は外れ、127.0.0.1 は IP の検査で拒否される
+    // (許可アドレスが空だと、ポート検査 (80/443 のみ) で先に止まり、IP の検査に届かない)。
+    let strict = refusing_fetcher();
     let server = probe_server::spawn(vec![Route::new("/feed", 200, "application/rss+xml")]).await;
 
-    let info = probe_common_paths(&strict, &site(&server, "/"), UA).await;
+    let info = probe_common_paths(&strict, &site_url(&server, "/"), UA).await;
     assert_eq!(info, None);
     assert!(
         server.requests().is_empty(),
@@ -601,9 +578,40 @@ async fn the_user_agent_is_sent_on_every_probe() {
     // pipeline.md G-10。UA のない取得を拒否するサイトがあるため、8 本すべてに付ける。
     let server = probe_server::spawn(vec![]).await;
 
-    let _ = probe_common_paths(&lenient(), &site(&server, "/"), "my-agent/2.0").await;
+    let _ = probe_common_paths(&lenient_fetcher(), &site_url(&server, "/"), "my-agent/2.0").await;
 
     let agents = server.user_agents();
     assert_eq!(agents.len(), 8);
     assert!(agents.iter().all(|ua| ua == "my-agent/2.0"), "{agents:?}");
+}
+
+#[test]
+fn proxied_content_type_drops_unknown_or_unreadable_charsets() {
+    let cases = [
+        // 単一引用符は除く
+        (
+            RootKind::Rss,
+            "text/xml; charset='utf-8'",
+            "application/rss+xml; charset=utf-8",
+        ),
+        // 知らないラベルは付けない
+        (
+            RootKind::Rss,
+            "text/xml; charset=x-unknown",
+            "application/rss+xml",
+        ),
+        // 複数の Content-Type をつないだ値は、ラベルとして読めないので付けない
+        (
+            RootKind::Rdf,
+            "text/xml; charset=utf-8, text/plain",
+            "application/rss+xml",
+        ),
+    ];
+    for (root, original, expected) in cases {
+        assert_eq!(
+            proxied_content_type(root, original),
+            expected,
+            "{original:?}"
+        );
+    }
 }

@@ -182,14 +182,33 @@ async fn xhtml_pages_are_not_mistaken_for_feeds() {
 
 #[tokio::test]
 async fn statuses_other_than_200_are_errors_with_the_status_in_the_message() {
-    for status in [404u16, 202, 500, 204] {
-        let server = probe_server::spawn(vec![Route::new("/", status, "text/html")]).await;
+    // 本文が空の応答と、有効な RSS を本文に持つ応答の両方。後者は、「200 だけが成功」(G-8) を、
+    // フィード判定とは独立に確かめる (本文が空だと、ステータスの判定を消しても、フィード判定で弾かれてしまう)。
+    let cases: [(u16, &str); 7] = [
+        (404, ""),
+        (202, ""),
+        (500, ""),
+        (204, ""),
+        (404, RSS2),
+        (202, RSS2),
+        (500, RSS2),
+    ];
+    for (status, body) in cases {
+        let server = probe_server::spawn(vec![
+            Route::new("/", status, "application/rss+xml").with_body(body),
+        ])
+        .await;
 
         let err = run(&server, "/", &options(false, false)).await.unwrap_err();
         let expected = format!("取得先が内容を返しませんでした (HTTP {status})");
         assert!(
             matches!(&err, FeedError::Http(m) if *m == expected),
-            "{status}: {err:?}"
+            "{status} {} : {err:?}",
+            if body.is_empty() {
+                "空の本文"
+            } else {
+                "RSS の本文"
+            }
         );
     }
 }
@@ -251,7 +270,15 @@ async fn use_feed_probes_common_paths_when_the_page_announces_nothing() {
 
 #[tokio::test]
 async fn an_unusable_detected_feed_falls_back_to_the_html_without_an_error() {
-    let cases: [(&str, Route); 3] = [
+    let cases: [(&str, Route); 5] = [
+        (
+            "404 (本文は有効な RSS)",
+            Route::new("/feed.xml", 404, "application/rss+xml").with_body(RSS2),
+        ),
+        (
+            "202 (本文は有効な RSS)",
+            Route::new("/feed.xml", 202, "application/rss+xml").with_body(RSS2),
+        ),
         (
             "取得先が 404",
             Route::new("/feed.xml", 404, "application/rss+xml"),
@@ -279,6 +306,11 @@ async fn an_unusable_detected_feed_falls_back_to_the_html_without_an_error() {
         let outcome = run(&server, "/", &options(true, false)).await.unwrap();
         let (feed, _) = generated(outcome);
         assert_eq!(feed.items[0].title, "First entry", "{label}");
+        assert_eq!(
+            heads(&server),
+            0,
+            "{label}: <link> があるので、共通パスは確認しない"
+        );
     }
 }
 
@@ -468,4 +500,115 @@ async fn production_generator_refuses_localhost_via_real_resolution() {
         .generate("http://localhost/", &GenerateOptions::default(), now())
         .await;
     assert!(matches!(result, Err(FeedError::UnsafeUrl(_))), "{result:?}");
+}
+
+// ---- G-2: 候補は先頭から順に、最大 3 件まで試す ----
+
+#[tokio::test]
+async fn candidates_are_tried_in_order_so_a_json_feed_first_does_not_block_the_next() {
+    let page = r#"<html><head><title>S</title>
+<link rel="alternate" type="application/feed+json" href="/feed.json">
+<link rel="alternate" type="application/atom+xml" href="/atom.xml">
+</head><body><h2><a href="/e/1">E</a></h2></body></html>"#;
+    let json = r#"{"version":"https://jsonfeed.org/version/1.1","items":[]}"#;
+    let server = probe_server::spawn(vec![
+        Route::page("/", "text/html", page),
+        Route::page("/feed.json", "application/feed+json", json),
+        Route::page("/atom.xml", "application/atom+xml", ATOM),
+    ])
+    .await;
+
+    let outcome = run(&server, "/", &options(true, false)).await.unwrap();
+    let (body, content_type, source_url) = proxied(outcome);
+
+    assert_eq!(
+        body,
+        ATOM.as_bytes(),
+        "JSON Feed は XML ではないので使えず、次に進む"
+    );
+    assert_eq!(content_type, "application/atom+xml");
+    assert_eq!(source_url, site_url(&server, "/atom.xml"));
+    assert_eq!(gets(&server), ["/", "/feed.json", "/atom.xml"]);
+}
+
+#[tokio::test]
+async fn at_most_three_candidates_are_tried() {
+    let links: String = (1..=5)
+        .map(|n| format!(r#"<link rel="alternate" type="application/rss+xml" href="/f{n}">"#))
+        .collect();
+    let page = format!(
+        r#"<html><head><title>S</title>{links}</head><body><h2><a href="/e/1">E</a></h2></body></html>"#
+    );
+    let server = probe_server::spawn(vec![
+        Route::page("/", "text/html", page),
+        Route::new("/f1", 404, ""),
+        Route::new("/f2", 404, ""),
+        Route::new("/f3", 404, ""),
+        Route::page("/f4", "application/rss+xml", RSS2),
+        Route::page("/f5", "application/rss+xml", RSS2),
+    ])
+    .await;
+
+    let outcome = run(&server, "/", &options(true, false)).await.unwrap();
+
+    // 4 件目には進まず、HTML の解析に進む (1 つのページが <link> を大量に並べても、取得が増幅しない)
+    let (feed, _) = generated(outcome);
+    assert_eq!(feed.items[0].title, "E");
+    assert_eq!(gets(&server), ["/", "/f1", "/f2", "/f3"]);
+}
+
+#[tokio::test]
+async fn detected_candidates_are_kept_when_the_proxy_fails_with_both_flags() {
+    let server = probe_server::spawn(vec![
+        Route::page("/", "text/html", PAGE_WITH_LINKS),
+        Route::new("/feed.xml", 404, ""),
+        Route::new("/atom.xml", 404, ""),
+    ])
+    .await;
+
+    let (_, detected) = generated(run(&server, "/", &options(true, true)).await.unwrap());
+    assert_eq!(detected.len(), 2);
+}
+
+// ---- G-10、G-3: UA とサイズ ----
+
+#[tokio::test]
+async fn the_user_agent_is_sent_on_every_redirect_hop() {
+    let server = probe_server::spawn(vec![
+        Route::redirect("/old", "/new"),
+        Route::page("/new", "text/html", PAGE),
+    ])
+    .await;
+
+    let _ = run(&server, "/old", &options(false, false)).await.unwrap();
+
+    assert_eq!(server.user_agents(), [UA, UA]);
+}
+
+#[tokio::test]
+async fn an_invalid_user_agent_is_an_error_not_a_panic_and_nothing_is_sent() {
+    let server = probe_server::spawn(vec![Route::page("/", "text/html", PAGE)]).await;
+    let mut opts = options(false, false);
+    opts.user_agent = "bad\r\nX-Injected: 1".to_string();
+
+    let result = run(&server, "/", &opts).await;
+
+    assert!(matches!(result, Err(FeedError::Http(_))), "{result:?}");
+    assert!(
+        server.requests().is_empty(),
+        "ヘッダを注入して送ってはいけない"
+    );
+}
+
+#[tokio::test]
+async fn a_body_over_the_size_limit_is_an_error() {
+    let big = vec![b'a'; 2 * 1024 * 1024 + 1];
+    let server = probe_server::spawn(vec![Route::page("/", "text/html", big)]).await;
+
+    let result = run(&server, "/", &options(false, false)).await;
+
+    assert!(
+        matches!(&result, Err(FeedError::Http(m)) if m == "応答が大きすぎます"),
+        "{result:?}"
+    );
 }

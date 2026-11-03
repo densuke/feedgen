@@ -113,3 +113,65 @@ fn unknown_labels_are_skipped_and_fall_back_in_order() {
     let unknown_meta = with(r#"<meta charset="x-unknown">日本語"#, b"");
     assert!(decode_html(&unknown_meta, "").ends_with("日本語"));
 }
+
+#[test]
+fn labels_that_encoding_rs_maps_to_replacement_are_treated_as_unknown() {
+    // iso-2022-kr や hz-gb-2312 は replacement。使うと、本文全体が U+FFFD 1 文字になる。
+    let meta = decode_html(
+        br#"<meta charset="iso-2022-kr"><h2>hello</h2>"#,
+        "text/html",
+    );
+    assert!(meta.contains("hello"), "{meta}");
+    assert_eq!(
+        decode_html(b"hello", "text/html; charset=hz-gb-2312"),
+        "hello"
+    );
+    // 未知として扱うので、次の手段 (meta) に進む
+    let body = with(r#"<meta charset="Shift_JIS">"#, SJIS);
+    assert!(decode_html(&body, "text/html; charset=iso-2022-kr").ends_with("日本語"));
+}
+
+#[test]
+fn a_meta_pointing_at_utf16_is_read_as_utf8() {
+    // ASCII 互換の本文を UTF-16 として読むと文字化けする。meta が UTF-16 を指すときは UTF-8 とみなす。
+    for label in ["utf-16", "utf-16le", "utf-16be"] {
+        let body = format!(r#"<meta charset="{label}">日本語"#);
+        let decoded = decode_html(body.as_bytes(), "text/html");
+        assert!(decoded.ends_with("日本語"), "{label}: {decoded}");
+    }
+}
+
+#[test]
+fn meta_charset_is_read_only_as_an_attribute_of_a_real_meta_tag() {
+    // 拾わないもの。Shift_JIS の本文を、誤って Shift_JIS として読めば日本語になるが、
+    // 正しく無視すれば UTF-8 として読み、日本語にならない。
+    let ignored = [
+        r#"<metadata charset="shift_jis">"#,
+        r#"<!-- <meta charset="shift_jis"> -->"#,
+        r#"<meta name="description" content="fix charset=shift_jis here">"#,
+        r#"<meta data-charset="shift_jis">"#,
+    ];
+    for head in ignored {
+        let decoded = decode_html(&with(head, SJIS), "text/html");
+        assert!(!decoded.contains("日本語"), "{head}: {decoded}");
+    }
+    // 本物の charset 属性は、別の属性名や、未知のラベルや、コメントの後ろにあっても拾う
+    let found = [
+        r#"<meta data-charset="utf-8" charset="shift_jis">"#,
+        r#"<meta data-charset="foo" charset="shift_jis">"#,
+        r#"<meta charset="x-unknown"><meta charset="shift_jis">"#,
+        r#"<!-- c --><meta charset="shift_jis">"#,
+    ];
+    for head in found {
+        let decoded = decode_html(&with(head, SJIS), "text/html");
+        assert!(decoded.ends_with("日本語"), "{head}: {decoded}");
+    }
+}
+
+#[test]
+fn single_quotes_around_the_header_charset_are_removed() {
+    assert_eq!(
+        decode_html(SJIS, "text/html; charset='Shift_JIS'"),
+        "日本語"
+    );
+}
