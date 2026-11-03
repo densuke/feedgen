@@ -12,6 +12,9 @@ pub fn resolve_bind(
     host_env: Option<&str>,
     port_env: Option<&str>,
 ) -> Result<SocketAddr, String> {
+    // 空文字の環境変数は、未設定として扱う (systemd の `Environment=FEEDGEN_HOST=` など)。
+    let host_env = host_env.filter(|value| !value.is_empty());
+    let port_env = port_env.filter(|value| !value.is_empty());
     let host = host_arg.or(host_env).unwrap_or(DEFAULT_HOST);
     let ip: IpAddr = host
         .parse()

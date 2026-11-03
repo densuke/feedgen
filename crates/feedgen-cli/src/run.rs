@@ -71,6 +71,11 @@ fn deliver(args: &Args, mut stderr: String, bytes: Vec<u8>) -> Report {
     }
 }
 
+/// 取得先の文字列から制御文字 (ANSI のエスケープ、改行など) を除く。端末の表示を書き換えさせない。
+fn printable(text: &str) -> String {
+    text.chars().filter(|c| !c.is_control()).collect()
+}
+
 /// 設定を読み、`--generate-url` ならURLを、そうでなければフィードを出力する。
 /// `-o` があれば `stdout` は空で、ファイルに書く。失敗は終了コード 1 と `stderr` のメッセージ。
 pub async fn run(
@@ -125,7 +130,7 @@ pub async fn run(
                     "既存フィード: {} {} ({})\n",
                     first.kind.label(),
                     first.url,
-                    first.title
+                    printable(&first.title)
                 ));
             }
             deliver(args, stderr, feed.to_xml(now).into_bytes())

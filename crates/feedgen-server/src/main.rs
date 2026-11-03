@@ -31,11 +31,24 @@ fn parse_args() -> Result<(Option<String>, Option<u16>), String> {
     Ok((host, port))
 }
 
+/// SIGTERM か Ctrl-C を待つ。登録に失敗したら、ログに出し、その信号では終了しない。
 async fn wait_for_signal() {
     let mut terminate =
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).ok();
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(signal) => Some(signal),
+            Err(error) => {
+                eprintln!("警告: SIGTERM を受け取れません: {error}");
+                None
+            }
+        };
     tokio::select! {
-        _ = tokio::signal::ctrl_c() => {}
+        result = tokio::signal::ctrl_c() => match result {
+            Ok(()) => {}
+            Err(error) => {
+                eprintln!("警告: Ctrl-C を受け取れません: {error}");
+                std::future::pending::<()>().await;
+            }
+        },
         _ = async {
             match terminate.as_mut() {
                 Some(signal) => { signal.recv().await; }

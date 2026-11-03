@@ -10,7 +10,9 @@ pub fn encode_title(title: &str) -> String {
         .filter(|c| !c.is_control())
         .take(MAX_TITLE_CHARS)
     {
-        if c.is_ascii() {
+        if c == '%' {
+            encoded.push_str("%25");
+        } else if c.is_ascii() {
             encoded.push(c);
         } else {
             let mut buffer = [0u8; 4];

@@ -104,7 +104,7 @@ async fn feed<S: FeedService>(
         Ok(request) => request,
         Err(ApiError { status, detail }) => return error(status, &detail),
     };
-    let Ok(_permit) = inner.permits.clone().try_acquire_owned() else {
+    let Ok(permit) = inner.permits.clone().try_acquire_owned() else {
         return error(
             StatusCode::SERVICE_UNAVAILABLE,
             "混雑しています。しばらくしてから再度お試しください",
@@ -113,19 +113,21 @@ async fn feed<S: FeedService>(
 
     let now = Utc::now().fixed_offset();
     let service = inner.service.clone();
-    // 別タスクで動かし、panic を JoinError として受け、締切で中断できるようにする。
-    let mut task =
-        tokio::spawn(async move { service.generate(&request.url, &request.options, now).await });
-    let joined = match tokio::time::timeout(inner.timeout, &mut task).await {
-        Ok(joined) => joined,
-        Err(_) => {
-            task.abort();
-            return error(StatusCode::GATEWAY_TIMEOUT, "処理に時間がかかりすぎました");
-        }
-    };
-    match joined {
-        Ok(Ok(outcome)) => success(outcome, now),
-        Ok(Err(failure)) => error(StatusCode::BAD_REQUEST, &failure.to_string()),
+    let timeout = inner.timeout;
+    // 別タスクで動かす。枠 (permit) と締切は、タスクの内側に置く。クライアントが切断してこの関数が
+    // 捨てられても、タスクは締切まで走り、枠は処理が終わるまで戻らない (A-6)。panic は JoinError で受ける。
+    let task = tokio::spawn(async move {
+        let _permit = permit;
+        tokio::time::timeout(
+            timeout,
+            service.generate(&request.url, &request.options, now),
+        )
+        .await
+    });
+    match task.await {
+        Ok(Ok(Ok(outcome))) => success(outcome, now),
+        Ok(Ok(Err(failure))) => error(StatusCode::BAD_REQUEST, &failure.to_string()),
+        Ok(Err(_elapsed)) => error(StatusCode::GATEWAY_TIMEOUT, "処理に時間がかかりすぎました"),
         Err(failure) => {
             eprintln!("内部エラー: {failure}");
             error(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
