@@ -1,0 +1,27 @@
+{
+  "metadata": {
+    "title": "Indent",
+    "description": "Line one...",
+    "link": "https://example.com/"
+  },
+  "items": [
+    {
+      "title": "Indented heading",
+      "description": "First   part\nsecond part",
+      "link": "https://example.com/a",
+      "guid": "https://example.com/#heading-0"
+    },
+    {
+      "title": "Card heading",
+      "description": "Card heading\nLine one\nLine two go",
+      "link": "https://example.com/c",
+      "guid": "https://example.com/#card-0"
+    },
+    {
+      "title": "Line after a blank one",
+      "description": "tiny\nLine after a blank one",
+      "link": "https://example.com/",
+      "guid": "https://example.com/#card-1"
+    }
+  ]
+}

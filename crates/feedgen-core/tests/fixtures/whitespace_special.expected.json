@@ -1,0 +1,15 @@
+{
+  "metadata": {
+    "title": "Special",
+    "description": "",
+    "link": "https://example.com/"
+  },
+  "items": [
+    {
+      "title": "Pre heading",
+      "description": "a\n\t\t\t\n\t\t\tb\nc  d\u000b\u000be\nf\n gx\n\n\ny",
+      "link": "https://example.com/p",
+      "guid": "https://example.com/#heading-0"
+    }
+  ]
+}

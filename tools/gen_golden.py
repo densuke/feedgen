@@ -12,6 +12,7 @@ Python 版と挙動を変えた箇所(docs/specs/parser.md の P-3, P-4, P-6)は
 このオラクルでは検証せず、Rust 側のテストに手書きの期待値を置く。
 """
 
+import argparse
 import json
 from pathlib import Path
 
@@ -50,11 +51,19 @@ def build_expected(html: str, base_url: str, max_items: int) -> dict:
 
 def main() -> None:
     """マニフェストの全フィクスチャについて期待値を書き出す."""
-    manifest = json.loads((FIXTURE_DIR / "manifest.json").read_text(encoding="utf-8"))
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--real",
+        action="store_true",
+        help="実サイトのフィクスチャ(tests/fixtures/real/、gitignore 済み)を対象にする",
+    )
+    fixture_dir = FIXTURE_DIR / "real" if parser.parse_args().real else FIXTURE_DIR
+    manifest = json.loads((fixture_dir / "manifest.json").read_text(encoding="utf-8"))
     for entry in manifest:
-        html = (FIXTURE_DIR / f"{entry['name']}.html").read_text(encoding="utf-8")
+        html_name = entry.get("file", f"{entry['name']}.html")
+        html = (fixture_dir / html_name).read_text(encoding="utf-8")
         expected = build_expected(html, entry["base_url"], entry["max_items"])
-        out_path = FIXTURE_DIR / f"{entry['name']}.expected.json"
+        out_path = fixture_dir / f"{entry['name']}.expected.json"
         out_path.write_text(
             json.dumps(expected, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
         )
