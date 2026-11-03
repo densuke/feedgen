@@ -132,7 +132,7 @@ pub fn feed_root(body: &[u8]) -> Option<RootKind>;
 
 ### D-6 代理取得の `Content-Type`
 
-**Response**: `proxied_content_type(root, original) -> String`。`Rss` と `Rdf` は `application/rss+xml`、`Atom` は `application/atom+xml`。元の `Content-Type` に `charset` があれば、`; charset=…` を引き継ぐ。なければ付けない (本文は変換しないため、XML 宣言の文字コードが生きる)。
+**Response**: `proxied_content_type(root, original) -> String`。`Rss` と `Rdf` は `application/rss+xml`、`Atom` は `application/atom+xml`。元の `Content-Type` の `charset` が、`encoding_rs` が知っているラベル (引用符は、二重・単一とも除く) のときだけ、`; charset=…` を引き継ぐ。ないとき、知らないラベルのとき、複数の `Content-Type` をつないだ値 (`utf-8, text/plain` など) のようにラベルとして読めないときは、付けない (本文は変換しないため、XML 宣言の文字コードが生きる)。
 
 ### D-7 取得とエラー
 
