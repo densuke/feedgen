@@ -175,3 +175,51 @@ fn single_quotes_around_the_header_charset_are_removed() {
         "日本語"
     );
 }
+
+#[test]
+fn malformed_meta_fragments_never_panic_or_loop() {
+    // 決まった疑似乱数 (LCG) で、`<meta` の周辺の断片を組み合わせた入力を作り、panic と無限ループがないことを確かめる。
+    let pieces: [&[u8]; 18] = [
+        b"<",
+        b">",
+        b"<meta",
+        b"<META ",
+        b"charset",
+        b"=",
+        b"\"",
+        b"'",
+        b" ",
+        b"/",
+        b"<!--",
+        b"-->",
+        b"http-equiv",
+        b"content",
+        b"shift_jis",
+        b";",
+        b"\xFF\xFE",
+        b"\xE3\x81",
+    ];
+    let mut state: u64 = 0x2545_F491_4F6C_DD1D;
+    let mut next = move || {
+        state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        (state >> 33) as usize
+    };
+    for _ in 0..5000 {
+        let mut body = Vec::new();
+        for _ in 0..(next() % 40) {
+            body.extend_from_slice(pieces[next() % pieces.len()]);
+        }
+        if next() % 4 == 0 {
+            body.extend(std::iter::repeat_n(b'x', next() % 2000)); // 1024 バイトの境界をまたぐ
+        }
+        let content_type = [
+            "",
+            "text/html",
+            "text/html; charset=",
+            "text/html; charset='",
+        ][next() % 4];
+        let _ = decode_html(&body, content_type);
+    }
+}

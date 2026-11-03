@@ -15,6 +15,10 @@ use crate::fetch::{Fetched, Lookup, Method, SafeFetcher, SystemLookup};
 use crate::models::RssFeed;
 use crate::parser::parse;
 
+/// 代理取得のために試す、検出した候補の最大数 (G-2 の 6)。1 つのページが `<link>` を大量に並べても、
+/// 取得が増幅しないようにする。
+const MAX_FEED_CANDIDATES: usize = 3;
+
 /// `generate` のオプション (G-1)。`max_items` の範囲 (1〜100) の検証は、API 層で行う。
 #[derive(Debug, Clone)]
 pub struct GenerateOptions {
@@ -110,7 +114,7 @@ impl<L: Lookup> FeedGenerator<L> {
                 .detect(&html, page.final_url.as_str(), user_agent)
                 .await;
             if options.use_feed
-                && let Some(proxied) = self.proxy_first(&detected, user_agent).await
+                && let Some(proxied) = self.proxy_candidates(&detected, user_agent).await
             {
                 return Ok(proxied);
             }
@@ -144,12 +148,22 @@ impl<L: Lookup> FeedGenerator<L> {
         found
     }
 
-    /// 候補の先頭を取得し、フィードとして使えれば `Proxied` にする。使えなければ `None`。
-    async fn proxy_first(&self, detected: &[FeedInfo], user_agent: &str) -> Option<Outcome> {
-        let first = detected.first()?;
+    /// 候補を先頭から順に、最大 `MAX_FEED_CANDIDATES` 件まで取得し、最初に使えたものを `Proxied` にする。
+    /// 1 件も使えなければ `None` (G-2 の 6、7)。
+    async fn proxy_candidates(&self, detected: &[FeedInfo], user_agent: &str) -> Option<Outcome> {
+        for candidate in detected.iter().take(MAX_FEED_CANDIDATES) {
+            if let Some(outcome) = self.fetch_feed(candidate, user_agent).await {
+                return Some(outcome);
+            }
+        }
+        None
+    }
+
+    /// 候補を取得し、ステータスが 200 で、本文のルート要素がフィードなら `Proxied` にする。
+    async fn fetch_feed(&self, candidate: &FeedInfo, user_agent: &str) -> Option<Outcome> {
         let feed = self
             .fetcher
-            .fetch_as(Method::Get, &first.url, user_agent)
+            .fetch_as(Method::Get, &candidate.url, user_agent)
             .await
             .ok()?;
         if feed.status != 200 {
@@ -158,7 +172,7 @@ impl<L: Lookup> FeedGenerator<L> {
         let root = feed_root(&feed.body)?;
         Some(Outcome::Proxied {
             content_type: proxied_content_type(root, &feed.content_type),
-            source_url: first.url.clone(),
+            source_url: candidate.url.clone(),
             body: feed.body,
         })
     }

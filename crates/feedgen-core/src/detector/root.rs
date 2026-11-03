@@ -4,7 +4,7 @@
 //! ルート要素の名前だけを見る。
 
 use super::RootKind;
-use crate::charset::charset_param;
+use crate::charset::known_charset;
 
 /// 走査する先頭のバイト数。
 const SCAN_LIMIT: usize = 64 * 1024;
@@ -49,7 +49,7 @@ pub(super) fn proxied_content_type(root: RootKind, original: &str) -> String {
         RootKind::Rss | RootKind::Rdf => "application/rss+xml",
         RootKind::Atom => "application/atom+xml",
     };
-    match charset_param(original) {
+    match known_charset(original) {
         Some(charset) => format!("{media_type}; charset={charset}"),
         None => media_type.to_string(),
     }
