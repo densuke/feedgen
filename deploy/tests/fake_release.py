@@ -3,7 +3,8 @@
 
 使い方: fake_release.py <ルートディレクトリ>
   /latest            -> ルートの LATEST ファイルの版へ 302 (/tag/v<版>)。LATEST がなければ 404
-  /download/...      -> ルート以下のファイル
+  /download/...      -> /blob/... へ 302 (GitHub の本物と同じく、アセットは別の場所へ転送される)
+  /blob/...          -> ルートの download/ 以下のファイル
   /health            -> ルートに healthy ファイルがあれば 200、なければ 503
 ポート番号は、起動後にルートの port ファイルに書く。
 """
@@ -36,7 +37,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             return
         if self.path.startswith("/download/"):
-            target = os.path.realpath(os.path.join(root, self.path.lstrip("/")))
+            # アセットの URL は、実際の GitHub では、別のホストへ 302 で転送される。
+            self.send_response(302)
+            self.send_header("Location", "/blob/" + self.path[len("/download/"):])
+            self.end_headers()
+            return
+        if self.path.startswith("/blob/"):
+            target = os.path.realpath(
+                os.path.join(root, "download", self.path[len("/blob/"):])
+            )
             if target.startswith(root + os.sep) and os.path.isfile(target):
                 with open(target, "rb") as handle:
                     data = handle.read()
