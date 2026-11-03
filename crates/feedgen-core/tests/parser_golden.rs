@@ -100,4 +100,14 @@ golden!(
     dedupe_limit,
     meta_fallback,
     long_card,
+    // `<noscript>` は要素として解析し、`<template>` の内側は文字列を空にする (P-1、P-2)
+    noscript_card,
+    noscript_heading,
+    template_heading,
+    template_description,
+    // しきい値と件数の境界 (カードの 9/10 文字と 199/200/201 文字、ブロックの 29/30 文字、limit)
+    cards_boundary,
+    blocks_limit,
+    blocks_threshold,
+    headings_skip,
 );

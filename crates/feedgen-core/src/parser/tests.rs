@@ -203,6 +203,20 @@ fn empty_and_garbage_input_do_not_panic() {
     }
 }
 
+// ---- 極端な max_items でも panic しない ----
+
+#[test]
+fn huge_max_items_does_not_overflow() {
+    // max_items * 2 や * 3 の掛け算が、debug ビルドで panic、release ビルドで 0 に回り込まないこと。
+    let html = r#"<h2><a href="/a">A</a></h2>"#;
+    for max_items in [usize::MAX, usize::MAX / 2 + 1, usize::MAX / 3 + 1] {
+        let items = parse(html, BASE, max_items, now()).1;
+        assert_eq!(items.len(), 1, "max_items = {max_items}");
+    }
+    // 0 件指定は 0 件
+    assert!(parse(html, BASE, 0, now()).1.is_empty());
+}
+
 // ---- P-5: 時刻は引数の now ----
 
 #[test]

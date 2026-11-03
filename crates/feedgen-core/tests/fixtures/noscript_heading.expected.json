@@ -1,0 +1,21 @@
+{
+  "metadata": {
+    "title": "T",
+    "description": "",
+    "link": "https://example.com/"
+  },
+  "items": [
+    {
+      "title": "NS title",
+      "description": "",
+      "link": "https://example.com/n",
+      "guid": "https://example.com/#heading-0"
+    },
+    {
+      "title": "A",
+      "description": "",
+      "link": "https://example.com/a",
+      "guid": "https://example.com/#heading-1"
+    }
+  ]
+}

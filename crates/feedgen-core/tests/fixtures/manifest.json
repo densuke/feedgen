@@ -56,5 +56,51 @@
     "name": "long_card",
     "base_url": "https://example.com/",
     "max_items": 20
+  },
+  {
+    "name": "noscript_card",
+    "base_url": "https://example.com/",
+    "max_items": 20
+  },
+  {
+    "name": "noscript_heading",
+    "base_url": "https://example.com/",
+    "max_items": 20
+  },
+  {
+    "name": "template_heading",
+    "base_url": "https://example.com/",
+    "max_items": 20
+  },
+  {
+    "name": "template_description",
+    "base_url": "https://example.com/",
+    "max_items": 20,
+    "compare_description": false,
+    "note": "P-3: Python 版は空の <p> にも ... を付けるため、チャンネルの説明は比べない"
+  },
+  {
+    "name": "cards_boundary",
+    "base_url": "https://example.com/",
+    "max_items": 20
+  },
+  {
+    "name": "blocks_limit",
+    "base_url": "https://example.com/",
+    "max_items": 2,
+    "compare_description": false,
+    "note": "P-3: Python 版は短い <p> にも ... を付けるため、チャンネルの説明は比べない"
+  },
+  {
+    "name": "blocks_threshold",
+    "base_url": "https://example.com/",
+    "max_items": 20,
+    "compare_description": false,
+    "note": "P-3: Python 版は短い <p> にも ... を付けるため、チャンネルの説明は比べない"
+  },
+  {
+    "name": "headings_skip",
+    "base_url": "https://example.com/",
+    "max_items": 2
   }
 ]

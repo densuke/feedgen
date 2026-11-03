@@ -1,0 +1,15 @@
+{
+  "metadata": {
+    "title": "T",
+    "description": "",
+    "link": "https://example.com/"
+  },
+  "items": [
+    {
+      "title": "hello card textx",
+      "description": "hello card textx",
+      "link": "https://example.com/x",
+      "guid": "https://example.com/#card-0"
+    }
+  ]
+}

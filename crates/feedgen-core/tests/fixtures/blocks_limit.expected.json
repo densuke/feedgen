@@ -1,0 +1,21 @@
+{
+  "metadata": {
+    "title": "T",
+    "description": "short s...",
+    "link": "https://example.com/"
+  },
+  "items": [
+    {
+      "title": "First valid block of text that is long enough. 1",
+      "description": "First valid block of text that is long enough. 1",
+      "link": "https://example.com/1",
+      "guid": "https://example.com/#content-1"
+    },
+    {
+      "title": "Second valid block of text that is long enough. 2",
+      "description": "Second valid block of text that is long enough. 2",
+      "link": "https://example.com/2",
+      "guid": "https://example.com/#content-2"
+    }
+  ]
+}

@@ -6,36 +6,18 @@
 
 crates/feedgen-core/tests/fixtures/manifest.json に載っている各フィクスチャ(HTML)を
 Python 版の HTMLParser で解析し、結果を <name>.expected.json に書き出す。
-時刻は固定する(pub_date は Rust 側のテストで「now と一致すること」を別に確認する)。
+pub_date は JSON に含めない(現在時刻になるため)。Rust 側のテストが
+「pub_date が引数の now と一致すること」を別に確認する。
 Python 版と挙動を変えた箇所(docs/specs/parser.md の P-3, P-4, P-6)は、
 このオラクルでは検証せず、Rust 側のテストに手書きの期待値を置く。
 """
 
 import json
-from datetime import datetime
 from pathlib import Path
 
-import feedgen.core.parser as parser_module
 from feedgen.core.parser import HTMLParser
 
 FIXTURE_DIR = Path(__file__).resolve().parent.parent / "crates" / "feedgen-core" / "tests" / "fixtures"
-FIXED_NOW = datetime(2026, 11, 3, 0, 0, 0)
-
-
-class FixedDatetime(datetime):
-    """now() が常に同じ時刻を返す datetime."""
-
-    @classmethod
-    def now(cls, tz=None):
-        """固定した時刻を返す.
-
-        Args:
-            tz: 使わない(datetime.now との互換のために受け取る)。
-
-        Returns:
-            固定した時刻。
-        """
-        return FIXED_NOW
 
 
 def build_expected(html: str, base_url: str, max_items: int) -> dict:
@@ -68,7 +50,6 @@ def build_expected(html: str, base_url: str, max_items: int) -> dict:
 
 def main() -> None:
     """マニフェストの全フィクスチャについて期待値を書き出す."""
-    parser_module.datetime = FixedDatetime
     manifest = json.loads((FIXTURE_DIR / "manifest.json").read_text(encoding="utf-8"))
     for entry in manifest:
         html = (FIXTURE_DIR / f"{entry['name']}.html").read_text(encoding="utf-8")
