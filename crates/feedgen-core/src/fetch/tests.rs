@@ -54,11 +54,9 @@ impl FakeLookup {
 struct StuckLookup;
 
 impl Lookup for StuckLookup {
-    fn lookup(&self, _host: &str) -> impl Future<Output = io::Result<Vec<IpAddr>>> + Send {
-        async move {
-            tokio::time::sleep(Duration::from_secs(30)).await;
-            Ok(vec![ip("8.8.8.8")])
-        }
+    async fn lookup(&self, _host: &str) -> io::Result<Vec<IpAddr>> {
+        tokio::time::sleep(Duration::from_secs(30)).await;
+        Ok(vec![ip("8.8.8.8")])
     }
 }
 

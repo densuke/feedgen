@@ -152,7 +152,15 @@ impl<L: Lookup> SafeFetcher<L> {
             if remaining.is_zero() {
                 return Err(http_error("応答に時間がかかりすぎています"));
             }
-            let addrs = self.resolve_checked(&current).await?;
+            // 名前解決も通算の締切に含める。間に合わなければ拒否と同じ文面で止める (S-6)。
+            let addrs = tokio::time::timeout(remaining, self.resolve_checked(&current))
+                .await
+                .map_err(|_| denied())??;
+            // 解決に使った時間は、通信の残り時間から引く。
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(http_error("応答に時間がかかりすぎています"));
+            }
             let hop = self.send_once(method, &current, &addrs, remaining).await?;
 
             let Some(location) = hop.location else {
@@ -167,8 +175,12 @@ impl<L: Lookup> SafeFetcher<L> {
         Err(FeedError::UnsafeUrl("リダイレクトが多すぎます".into()))
     }
 
-    /// host を解決し、全アドレスが公開であることを確かめる (S-4)。
+    /// ポートを確かめ、host を解決し、全アドレスが公開であることを確かめる (S-4)。
     async fn resolve_checked(&self, url: &Url) -> Result<Vec<IpAddr>> {
+        let port = url.port_or_known_default().ok_or_else(denied)?;
+        if !self.is_allowed_port(port) {
+            return Err(denied());
+        }
         let addrs = match url.host() {
             Some(Host::Ipv4(ip)) => vec![IpAddr::V4(ip)],
             Some(Host::Ipv6(ip)) => vec![IpAddr::V6(ip)],
@@ -179,6 +191,16 @@ impl<L: Lookup> SafeFetcher<L> {
             return Err(denied());
         }
         Ok(addrs)
+    }
+
+    /// 許可するポートは 80 と 443 のみ (S-4)。
+    fn is_allowed_port(&self, port: u16) -> bool {
+        // テストの取得器 (許可アドレスあり) は、ローカルサーバーの任意ポートを通す (S-10)。
+        #[cfg(test)]
+        if !self.allow.is_empty() {
+            return true;
+        }
+        matches!(port, 80 | 443)
     }
 
     fn is_allowed(&self, ip: IpAddr) -> bool {
@@ -236,14 +258,19 @@ impl<L: Lookup> SafeFetcher<L> {
             });
         }
 
-        let encoding = response
-            .headers()
-            .get(CONTENT_ENCODING)
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or("")
-            .trim()
-            .to_ascii_lowercase();
-        if !encoding.is_empty() && encoding != "identity" {
+        // ヘッダが複数あるときも全件を見る。1 つでも identity 以外なら拒否する (S-7)。
+        let unsupported_encoding =
+            response
+                .headers()
+                .get_all(CONTENT_ENCODING)
+                .iter()
+                .any(|value| {
+                    value.to_str().map_or(true, |v| {
+                        let v = v.trim();
+                        !(v.is_empty() || v.eq_ignore_ascii_case("identity"))
+                    })
+                });
+        if unsupported_encoding {
             return Err(http_error("未対応の圧縮形式です"));
         }
         let max = self.limits.max_bytes;

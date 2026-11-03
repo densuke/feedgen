@@ -22,6 +22,13 @@ pub(super) fn check_chars(raw: &str) -> Result<()> {
 /// 以後の検査と接続には、この `Url` をそのまま使う。
 pub fn check_url(raw: &str) -> Result<Url> {
     check_chars(raw)?;
+    // `http:evil@host/` のように `//` を欠いた形は、認証部の検査をすり抜けるので入口で弾く。
+    let lower = raw.to_ascii_lowercase();
+    if !(lower.starts_with("http://") || lower.starts_with("https://")) {
+        return Err(FeedError::UnsafeUrl(
+            "http または https の URL のみ取得できます".into(),
+        ));
+    }
     let (_, rest) = raw.split_once("://").ok_or_else(denied)?;
     let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
     if authority.is_empty() {
@@ -39,6 +46,10 @@ pub fn check_url(raw: &str) -> Result<Url> {
     }
     if url.host().is_none() {
         return Err(FeedError::UnsafeUrl("URL にホストがありません".into()));
+    }
+    // 生の文字列の検査の漏れを検知する保険
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err(denied());
     }
     Ok(url)
 }
