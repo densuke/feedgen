@@ -13,6 +13,10 @@ pub enum FeedError {
     /// メッセージには解決したアドレスなどの内部情報を含めない (docs/specs/ssrf.md S-9)。
     #[error("{0}")]
     UnsafeUrl(String),
+
+    /// YouTube の検索の失敗 (キー未設定、API の失敗)。キーも API の応答の本文も含めない (youtube.md Y-7)。
+    #[error("{0}")]
+    YouTube(String),
 }
 
 /// クレート共通の Result 別名。

@@ -10,6 +10,7 @@ URLの内容を分析して、RSS 2.0 のフィードを生成するツール。
 - 文字コードの判定 (BOM、`Content-Type`、`<meta>`)
 - SSRF 対策つきの取得 (下の「安全性」)
 - 設定ファイル (YAML) によるコマンドラインの既定値
+- YouTube の検索結果の URL (`https://www.youtube.com/results?search_query=…`) を、YouTube Data API で動画のフィードにする。API キーは環境変数 `YOUTUBE_API_KEY` (サーバーと CLI の起動時に読む)。キーがない、または API が失敗したときは、空のフィードではなくエラー (API は 400)。チャンネルと再生リストは対象外。仕様は [docs/specs/youtube.md](docs/specs/youtube.md)
 
 **対象外**: Instagram、Google News のデコード、翻訳、redis キャッシュ。以前の Python 版にあった機能で、利用実績がなく、Rust 版には移植していない。Python 版はフェードアウト中で、保守しない。
 

@@ -48,6 +48,8 @@
 
 ## ⚙️ feedgenでの設定方法
 
+> **Rust 版の注意**: Rust 版は、キーを環境変数 `YOUTUBE_API_KEY` からだけ読む (サーバーと CLI の起動時)。設定ファイルの `youtube_api_key` は読まない (方法1 は Python 版の手順)。e2 での渡し方は [deploy/README.md](../deploy/README.md) の「YouTube の検索」。
+
 ### 方法1: 設定ファイルで指定
 
 `config.yaml`を作成して以下を記述:

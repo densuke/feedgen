@@ -88,7 +88,10 @@ async fn main() -> ExitCode {
     };
     eprintln!("待ち受け開始: {address}");
 
-    let app = router(Arc::new(FeedGenerator::new()), AppConfig::default());
+    let app = router(
+        Arc::new(FeedGenerator::new().with_youtube_api_key(std::env::var("YOUTUBE_API_KEY").ok())),
+        AppConfig::default(),
+    );
     let (stop, mut graceful) = watch::channel(false);
     let mut deadline = stop.subscribe();
     tokio::spawn(async move {

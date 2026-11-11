@@ -14,6 +14,7 @@ use crate::error::{FeedError, Result};
 use crate::fetch::{Fetched, Lookup, Method, SafeFetcher, SystemLookup};
 use crate::models::RssFeed;
 use crate::parser::parse;
+use crate::youtube;
 
 /// 代理取得のために試す、検出した候補の最大数 (G-2 の 6)。1 つのページが `<link>` を大量に並べても、
 /// 取得が増幅しないようにする。
@@ -69,8 +70,11 @@ pub enum Outcome {
 }
 
 /// フィード生成のパイプライン。`SafeFetcher` を 1 つ持つ。
+/// `Debug` は実装しない (API キーを出力する口を作らない。youtube.md Y-6)。
 pub struct FeedGenerator<L: Lookup = SystemLookup> {
     fetcher: SafeFetcher<L>,
+    youtube_api_key: Option<String>,
+    youtube_endpoint: String,
 }
 
 impl FeedGenerator<SystemLookup> {
@@ -78,6 +82,8 @@ impl FeedGenerator<SystemLookup> {
     pub fn new() -> Self {
         Self {
             fetcher: SafeFetcher::new(),
+            youtube_api_key: None,
+            youtube_endpoint: youtube::SEARCH_ENDPOINT.to_string(),
         }
     }
 }
@@ -92,7 +98,24 @@ impl<L: Lookup> FeedGenerator<L> {
     /// テスト用の差し込み口。
     #[cfg(test)]
     pub(crate) fn with_fetcher(fetcher: SafeFetcher<L>) -> Self {
-        Self { fetcher }
+        Self {
+            fetcher,
+            youtube_api_key: None,
+            youtube_endpoint: youtube::SEARCH_ENDPOINT.to_string(),
+        }
+    }
+
+    /// テスト用: YouTube API の取得先を、ローカルの偽サーバーに差し替える (本番には口を作らない。ssrf.md S-10)。
+    #[cfg(test)]
+    pub(crate) fn with_youtube_endpoint(mut self, endpoint: String) -> Self {
+        self.youtube_endpoint = endpoint;
+        self
+    }
+
+    /// YouTube Data API のキー (youtube.md Y-6)。空文字は未設定として扱う。
+    pub fn with_youtube_api_key(mut self, key: Option<String>) -> Self {
+        self.youtube_api_key = key.filter(|key| !key.is_empty());
+        self
     }
 
     /// URL からフィードを生成する (G-1、G-2)。現在時刻は、引数で受け取る (G-4)。
@@ -103,6 +126,11 @@ impl<L: Lookup> FeedGenerator<L> {
         now: DateTime<FixedOffset>,
     ) -> Result<Outcome> {
         let user_agent = options.user_agent.as_str();
+
+        // YouTube の検索 URL は、ページを取得せず、API で答える (youtube.md Y-1、Y-2)。
+        if let Some(query) = youtube::search_query(url) {
+            return self.youtube_search(url, &query, options, now).await;
+        }
 
         // 1. 対象の URL を、1 回だけ取得する。以後、この本文を使い回す。
         let page = self.fetcher.fetch_as(Method::Get, url, user_agent).await?;
@@ -147,6 +175,38 @@ impl<L: Lookup> FeedGenerator<L> {
             } else {
                 Vec::new()
             },
+        })
+    }
+
+    /// API の検索の結果をフィードにする。キーがなければ通信しない (youtube.md Y-3、Y-6、Y-7)。
+    async fn youtube_search(
+        &self,
+        url: &str,
+        query: &str,
+        options: &GenerateOptions,
+        now: DateTime<FixedOffset>,
+    ) -> Result<Outcome> {
+        let key = self
+            .youtube_api_key
+            .as_deref()
+            .ok_or_else(|| FeedError::YouTube(youtube::NO_KEY.to_string()))?;
+        let api = youtube::api_url(&self.youtube_endpoint, query, options.max_items, key);
+        // 取得層のエラーは固定の文言で、URL (キーを含む) を含まない (ssrf.md S-9)。
+        let response = self
+            .fetcher
+            .fetch_as(Method::Get, &api, &options.user_agent)
+            .await?;
+        let feed = youtube::feed_from_response(
+            response.status,
+            &response.body,
+            query,
+            url,
+            options.max_items,
+            now,
+        )?;
+        Ok(Outcome::Generated {
+            feed,
+            detected: Vec::new(),
         })
     }
 

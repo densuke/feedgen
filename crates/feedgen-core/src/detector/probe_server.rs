@@ -132,7 +132,9 @@ async fn handle(mut stream: TcpStream, routes: Arc<Vec<Route>>, log: Arc<Mutex<V
         .expect("ロックを取得できない")
         .push((method.clone(), path.clone(), user_agent));
 
-    let route = routes.iter().find(|r| r.path == path);
+    // クエリは照合に使わない (記録には残す)。
+    let route_path = path.split('?').next().unwrap_or("");
+    let route = routes.iter().find(|r| r.path == route_path);
     if let Some(route) = route {
         tokio::time::sleep(route.delay).await;
     }
