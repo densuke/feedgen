@@ -127,6 +127,11 @@ impl<L: Lookup> FeedGenerator<L> {
     ) -> Result<Outcome> {
         let user_agent = options.user_agent.as_str();
 
+        // YouTube の検索 URL は、ページを取得せず、API で答える (youtube.md Y-1、Y-2)。
+        if let Some(query) = youtube::search_query(url) {
+            return self.youtube_search(url, &query, options, now).await;
+        }
+
         // 1. 対象の URL を、1 回だけ取得する。以後、この本文を使い回す。
         let page = self.fetcher.fetch_as(Method::Get, url, user_agent).await?;
         require_ok(&page)?;
@@ -170,6 +175,38 @@ impl<L: Lookup> FeedGenerator<L> {
             } else {
                 Vec::new()
             },
+        })
+    }
+
+    /// API の検索の結果をフィードにする。キーがなければ通信しない (youtube.md Y-3、Y-6、Y-7)。
+    async fn youtube_search(
+        &self,
+        url: &str,
+        query: &str,
+        options: &GenerateOptions,
+        now: DateTime<FixedOffset>,
+    ) -> Result<Outcome> {
+        let key = self
+            .youtube_api_key
+            .as_deref()
+            .ok_or_else(|| FeedError::YouTube(youtube::NO_KEY.to_string()))?;
+        let api = youtube::api_url(&self.youtube_endpoint, query, options.max_items, key);
+        // 取得層のエラーは固定の文言で、URL (キーを含む) を含まない (ssrf.md S-9)。
+        let response = self
+            .fetcher
+            .fetch_as(Method::Get, &api, &options.user_agent)
+            .await?;
+        let feed = youtube::feed_from_response(
+            response.status,
+            &response.body,
+            query,
+            url,
+            options.max_items,
+            now,
+        )?;
+        Ok(Outcome::Generated {
+            feed,
+            detected: Vec::new(),
         })
     }
 

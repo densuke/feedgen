@@ -26,6 +26,22 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now feedgen-rs-update.timer
 ```
 
+### YouTube の検索 (任意)
+
+YouTube の検索 URL を使うには、`feedgen-rs.service` に API キーを渡す。キーは、リポジトリ・ログ・チャットに出さない。
+
+```bash
+sudo install -m 0600 -o root -g root /dev/null /etc/default/feedgen-rs
+sudoedit /etc/default/feedgen-rs        # YOUTUBE_API_KEY=<キー> の 1 行を書く
+sudo systemctl edit feedgen-rs.service  # 下の 2 行を足す
+#   [Service]
+#   EnvironmentFile=-/etc/default/feedgen-rs
+sudo systemctl daemon-reload
+sudo systemctl restart feedgen-rs.service
+```
+
+キーがない間は、YouTube の検索 URL に 400 (`YouTube の検索には API キーの設定が必要です`) を返す。
+
 ## 運用
 
 - すぐに更新を確認する: `sudo systemctl start feedgen-rs-update.service`

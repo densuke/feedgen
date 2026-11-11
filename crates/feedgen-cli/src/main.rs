@@ -17,7 +17,9 @@ async fn main() -> ExitCode {
         }
     };
     let now = Utc::now().fixed_offset();
-    let report = run(&args, &cwd, &FeedGenerator::new(), now).await;
+    let generator =
+        FeedGenerator::new().with_youtube_api_key(std::env::var("YOUTUBE_API_KEY").ok());
+    let report = run(&args, &cwd, &generator, now).await;
     eprint!("{}", report.stderr);
     {
         use std::io::Write;
