@@ -377,6 +377,23 @@ async fn core_errors_map_to_400_with_the_core_message() {
             .unwrap()
             .contains("boom")
     );
+
+    // YouTube の検索の失敗も、空のフィードではなく 400 と理由 (youtube.md Y-7)。
+    let service = Fake::new(|| {
+        Err(FeedError::YouTube(
+            "YouTube の検索には API キーの設定が必要です".to_string(),
+        ))
+    });
+    let response = get(
+        app(service),
+        "/feed?url=https://www.youtube.com/results?search_query=a",
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        body_json(response).await["detail"],
+        "YouTube の検索には API キーの設定が必要です"
+    );
 }
 
 #[tokio::test]

@@ -9,6 +9,7 @@ pub mod fetch;
 pub mod generator;
 pub mod models;
 pub mod parser;
+mod youtube;
 
 pub use error::{FeedError, Result};
 pub use models::{RssFeed, RssItem};
