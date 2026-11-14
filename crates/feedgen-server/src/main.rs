@@ -5,18 +5,20 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use feedgen_core::generator::FeedGenerator;
+use feedgen_server::admin::resolve_admin;
 use feedgen_server::listen::resolve_bind;
 use feedgen_server::{AppConfig, router};
 use tokio::sync::watch;
 
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(30);
 
-fn parse_args() -> Result<(Option<String>, Option<u16>), String> {
-    let (mut host, mut port) = (None, None);
+fn parse_args() -> Result<(Option<String>, Option<u16>, bool), String> {
+    let (mut host, mut port, mut admin) = (None, None, false);
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         let mut next = |name: &str| args.next().ok_or(format!("{name} に値がありません"));
         match arg.as_str() {
+            "--admin" => admin = true,
             "--host" => host = Some(next("--host")?),
             "--port" => {
                 let raw = next("--port")?;
@@ -28,7 +30,7 @@ fn parse_args() -> Result<(Option<String>, Option<u16>), String> {
             other => return Err(format!("不明な引数です: {other}")),
         }
     }
-    Ok((host, port))
+    Ok((host, port, admin))
 }
 
 /// SIGTERM か Ctrl-C を待つ。登録に失敗したら、ログに出し、その信号では終了しない。
@@ -60,7 +62,7 @@ async fn wait_for_signal() {
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    let (host, port) = match parse_args() {
+    let (host, port, admin_arg) = match parse_args() {
         Ok(parsed) => parsed,
         Err(message) => {
             eprintln!("エラー: {message}");
@@ -88,9 +90,16 @@ async fn main() -> ExitCode {
     };
     eprintln!("待ち受け開始: {address}");
 
+    let admin = resolve_admin(admin_arg, std::env::var("FEEDGEN_ADMIN").ok().as_deref());
+    if admin {
+        eprintln!("管理ページを有効にしました (/admin)");
+    }
     let app = router(
         Arc::new(FeedGenerator::new().with_youtube_api_key(std::env::var("YOUTUBE_API_KEY").ok())),
-        AppConfig::default(),
+        AppConfig {
+            admin,
+            ..AppConfig::default()
+        },
     );
     let (stop, mut graceful) = watch::channel(false);
     let mut deadline = stop.subscribe();
