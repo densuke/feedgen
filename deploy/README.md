@@ -57,3 +57,14 @@ sudo systemctl restart feedgen-rs.service
 - リポジトリが非公開の場合は、取得に認証が要る。`/etc/default/feedgen-rs-update` (モード 0600) で渡す設計にしてあるが、`update.sh` はまだ認証に対応していない。
 - `update.sh` は、リリースが 1 つもない間は、「最新の版を解釈できません」で終了コード 1 になる (GitHub が `/releases/latest` を `/releases` へ転送するため。何も壊さない)。2026-11-03 に e2 で確認した。
 - e2 の `~/work/feedgen-rs/VERSION` は、まだない (初回の手動配置のため)。最初のタグ付きリリースが出れば、`update.sh` が、それを入れて `VERSION` を作る。
+
+## 管理ページ (`/admin`) の有効化
+
+既定では無効。有効にする前に、Caddy で `/admin` を、許可した接続元だけにする (仕様は [../docs/specs/admin.md](../docs/specs/admin.md) の M-9、M-10)。順序を変えない。
+
+1. 新しい版に更新する (この時点では `/admin` は `404`)。
+2. `Caddyfile` の `feedgen.fuga.jp` に、`/docs` の規則と同じ接続元で、`@admin_denied` の規則を足す (バックアップ、`caddy validate`、`reload`)。
+3. `feedgen-rs.service` のドロップインに `Environment=FEEDGEN_ADMIN=1` を足して、再起動する。
+4. 許可した接続元から `200`、**許可していない接続元 (携帯の回線など) から `403`** を確かめる。
+
+戻し方: ドロップインから `FEEDGEN_ADMIN=1` を外して、再起動する (`/admin` が `404` に戻る)。
