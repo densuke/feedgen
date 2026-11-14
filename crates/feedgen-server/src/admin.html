@@ -156,15 +156,16 @@ function renderPreview(status, contentType, existing, body) {
   if (entries.length > MAX_PREVIEW) out.appendChild(el('p', '先頭の ' + MAX_PREVIEW + ' 件を表示しました'));
 }
 
-function refresh() {
+// 入力中と起動時は、エラーを出さない。ボタンを押したときだけ、出す。
+function refresh(showErrors) {
   const built = buildUrl();
   $('result').textContent = built.url || '';
-  say(built.error || '', true);
+  say(showErrors ? (built.error || '') : '', true);
   return built;
 }
 
 async function copyUrl() {
-  const built = refresh();
+  const built = refresh(true);
   if (!built.url) return;
   try {
     await navigator.clipboard.writeText(built.url);
@@ -180,7 +181,7 @@ async function copyUrl() {
 }
 
 async function runPreview() {
-  const built = refresh();
+  const built = refresh(true);
   if (!built.url) return;
   const button = $('preview');
   button.disabled = true;
@@ -203,11 +204,11 @@ async function runPreview() {
 }
 
 for (const id of ['url', 'max-items', 'use-feed', 'feed-first']) {
-  $(id).addEventListener('input', refresh);
+  $(id).addEventListener('input', () => refresh(false));
 }
 $('copy').addEventListener('click', copyUrl);
 $('preview').addEventListener('click', runPreview);
-refresh();
+refresh(false);
 </script>
 </body>
 </html>
