@@ -27,6 +27,8 @@ const RSS_CONTENT_TYPE: &str = "application/rss+xml; charset=utf-8";
 pub struct AppConfig {
     pub timeout: Duration,
     pub max_concurrent: usize,
+    /// 管理ページ (`GET /admin`) を配信するか (docs/specs/admin.md M-1)。既定は無効。
+    pub admin: bool,
 }
 
 impl Default for AppConfig {
@@ -34,6 +36,7 @@ impl Default for AppConfig {
         Self {
             timeout: Duration::from_secs(60),
             max_concurrent: 32,
+            admin: false,
         }
     }
 }

@@ -411,6 +411,7 @@ fn config(timeout: Duration, max_concurrent: usize) -> AppConfig {
     AppConfig {
         timeout,
         max_concurrent,
+        ..AppConfig::default()
     }
 }
 
