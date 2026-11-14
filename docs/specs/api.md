@@ -40,6 +40,7 @@
 | `GET /feed` | A-2〜A-4 |
 | `GET /health` | `200`、`{"status": "healthy", "service": "feedgen API"}` |
 | `GET /` | `200`、サービス名・バージョン・説明・`/feed` と `/health` の説明を持つ JSON |
+| `GET /admin` | **既定では存在しない (`404`)**。`--admin` か `FEEDGEN_ADMIN=1` で有効にしたときだけ、管理ページ (HTML) を返す。仕様は [admin.md](admin.md)。`/` の JSON には載せない |
 | 上記以外のパスとメソッド | `404` / `405`。本文は `{"detail": "…"}` |
 
 CORS は、全オリジン、`GET` のみ、全ヘッダを許可する (Python 版と同じ)。認証情報つきの CORS は、許可しない (全オリジンと認証情報の組み合わせは、仕様上、意味を持たない)。

@@ -46,6 +46,7 @@ FEEDGEN_HOST=127.0.0.1 FEEDGEN_PORT=8000 feedgen-server
 | `GET /feed` | URL からフィードを返す |
 | `GET /health` | 死活確認。`{"status":"healthy","service":"feedgen API"}` |
 | `GET /` | サービス情報 |
+| `GET /admin` | 管理ページ (**既定では無効**。下の「管理ページ」) |
 
 CORS は、全オリジン、`GET` のみ許可する。
 
@@ -83,6 +84,18 @@ curl "http://127.0.0.1:8000/feed?url=https://example.com/&use_feed=true"
 | 想定外のエラー | 500 (詳細は返さない) |
 
 `google_news_*` や `translation_*` など、Python 版のパラメータは、受け付けて無視する。
+
+## 管理ページ
+
+フィードの URL を組み立て、結果を確かめる、最小のページ (`GET /admin`)。何も保存しない。バイナリに埋め込んであり、**既定では無効**。
+
+```bash
+feedgen-server --admin          # 起動の引数で有効にする
+FEEDGEN_ADMIN=1 feedgen-server  # 環境変数 (1 か true) でも有効にできる
+```
+
+- 組み立てる URL は、ページを開いたオリジンを使う (設定の値には依存しない)。
+- **公開してはいけない。** 有効にするときは、リバースプロキシ (Caddy など) で、許可した接続元だけに制限する。手順と戻し方は [docs/specs/admin.md](docs/specs/admin.md) の M-9、M-10。
 
 ## コマンドライン
 

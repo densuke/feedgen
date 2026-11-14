@@ -57,10 +57,17 @@ pub fn router<S: FeedService>(service: Arc<S>, config: AppConfig) -> Router {
         .allow_origin(Any)
         .allow_methods([Method::GET])
         .allow_headers(Any);
-    Router::new()
+    let routes = Router::new()
         .route("/", get(root))
         .route("/health", get(health))
-        .route("/feed", get(feed::<S>))
+        .route("/feed", get(feed::<S>));
+    // 管理ページは、有効にしたときだけルートを足す。無効なら、ルートがなく、既存の 404 になる (admin.md M-2)。
+    let routes = if config.admin {
+        routes.route("/admin", get(crate::admin::page))
+    } else {
+        routes
+    };
+    routes
         .method_not_allowed_fallback(method_not_allowed)
         .fallback(not_found)
         .with_state(inner)

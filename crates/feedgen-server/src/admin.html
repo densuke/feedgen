@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>feedgen 管理</title>
+<style>
+  :root { color-scheme: light dark; --gap: 12px; }
+  body { font: 16px/1.6 system-ui, sans-serif; margin: 0; padding: 16px; }
+  main { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 1.3rem; margin: 0 0 var(--gap); }
+  label { display: block; margin: var(--gap) 0 4px; font-weight: 600; }
+  .check { display: flex; gap: 8px; align-items: center; font-weight: 400; margin: 8px 0; }
+  input[type="text"], input[type="number"], output { width: 100%; box-sizing: border-box; font: inherit; padding: 8px; }
+  input[type="number"] { max-width: 8em; }
+  output { display: block; word-break: break-all; border: 1px solid #8888; border-radius: 4px; min-height: 2.4em; }
+  button { font: inherit; padding: 8px 16px; margin: var(--gap) 8px 0 0; }
+  #message { min-height: 1.6em; margin-top: 8px; }
+  .error { color: #c00; }
+  ul { padding-left: 1.2em; }
+  li { margin: 4px 0; }
+  .small { font-size: 0.85rem; opacity: 0.8; }
+  pre { white-space: pre-wrap; word-break: break-all; }
+</style>
+</head>
+<body>
+<main>
+  <h1>feedgen 管理</h1>
+  <p class="small">フィードの URL を組み立てて、結果を確かめます。何も保存しません。</p>
+
+  <label for="url">対象の URL</label>
+  <input type="text" id="url" placeholder="https://example.com/" autocomplete="off">
+
+  <label for="max-items">最大記事数 (1〜100。空なら既定の 20)</label>
+  <input type="number" id="max-items" min="1" max="100" step="1">
+
+  <label class="check"><input type="checkbox" id="use-feed"> 既存のフィードがあれば代理取得する</label>
+  <label class="check"><input type="checkbox" id="feed-first"> 既存フィードの検出結果をヘッダに付ける</label>
+
+  <label for="result">組み立てた URL</label>
+  <output id="result"></output>
+  <button type="button" id="copy">コピー</button>
+  <button type="button" id="preview">プレビュー</button>
+  <div id="message" role="status"></div>
+  <div id="preview-out"></div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const MAX_PREVIEW = 20;
+
+// 入力から /feed の URL を組み立てる。指定されたものだけを、url、max_items、use_feed、feed_first の順に入れる。
+function buildUrl() {
+  const target = $('url').value.trim();
+  if (!(target.startsWith('http://') || target.startsWith('https://'))) {
+    return { error: '対象の URL は http:// か https:// で始めてください' };
+  }
+  const max = $('max-items').value.trim();
+  if (max !== '' && !(/^[0-9]+$/.test(max) && Number(max) >= 1 && Number(max) <= 100)) {
+    return { error: '最大記事数は 1〜100 の整数にしてください' };
+  }
+  const params = new URLSearchParams();
+  params.set('url', target);
+  if (max !== '') params.set('max_items', max);
+  if ($('use-feed').checked) params.set('use_feed', 'true');
+  if ($('feed-first').checked) params.set('feed_first', 'true');
+  return { url: location.origin + '/feed?' + params.toString() };
+}
+
+function say(text, isError) {
+  const box = $('message');
+  box.textContent = text;
+  box.className = isError ? 'error' : '';
+}
+
+// 取得先由来の文字列は、すべて textContent で入れる。
+function el(tag, text) {
+  const node = document.createElement(tag);
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function safeHref(value) {
+  try {
+    const scheme = new URL(value).protocol;
+    return scheme === 'http:' || scheme === 'https:';
+  } catch (e) {
+    return false;
+  }
+}
+
+function linkOrText(value) {
+  if (!safeHref(value)) return el('span', value);
+  const a = el('a', value);
+  a.href = value;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  return a;
+}
+
+function decoded(value) {
+  try { return decodeURIComponent(value); } catch (e) { return value; }
+}
+
+function firstText(parent, name) {
+  const node = parent.getElementsByTagName(name)[0];
+  return node ? node.textContent.trim() : '';
+}
+
+function entryLink(entry) {
+  const link = entry.getElementsByTagName('link')[0];
+  if (!link) return '';
+  return link.getAttribute('href') || link.textContent.trim();
+}
+
+// ステータス、ヘッダ、本文から、プレビューを描く。
+function renderPreview(status, contentType, existing, body) {
+  const out = $('preview-out');
+  out.textContent = '';
+  out.appendChild(el('p', 'HTTP ' + status + (contentType ? ' / ' + contentType : '')));
+
+  for (const [label, value] of existing) {
+    out.appendChild(el('p', label + ': ' + value));
+  }
+
+  if (status !== 200) {
+    let detail = body.slice(0, 500);
+    try { detail = JSON.parse(body).detail || detail; } catch (e) { /* 本文をそのまま出す */ }
+    const p = el('p', String(detail));
+    p.className = 'error';
+    out.appendChild(p);
+    return;
+  }
+
+  const doc = new DOMParser().parseFromString(body, 'application/xml');
+  if (doc.getElementsByTagName('parsererror').length > 0) {
+    out.appendChild(el('p', 'XML として解釈できませんでした。本文の先頭:'));
+    out.appendChild(el('pre', body.slice(0, 500)));
+    return;
+  }
+  const entries = Array.from(doc.getElementsByTagName('item')).concat(Array.from(doc.getElementsByTagName('entry')));
+  out.appendChild(el('p', 'フィードの題: ' + (firstText(doc, 'title') || '(なし)') + ' / 記事 ' + entries.length + ' 件'));
+  const list = el('ul');
+  for (const entry of entries.slice(0, MAX_PREVIEW)) {
+    const li = el('li');
+    li.appendChild(el('strong', firstText(entry, 'title') || '(題なし)'));
+    const when = firstText(entry, 'pubDate') || firstText(entry, 'updated') || firstText(entry, 'date');
+    if (when) li.appendChild(el('span', ' ' + when));
+    const href = entryLink(entry);
+    if (href) {
+      li.appendChild(el('br'));
+      li.appendChild(linkOrText(href));
+    }
+    list.appendChild(li);
+  }
+  out.appendChild(list);
+  if (entries.length > MAX_PREVIEW) out.appendChild(el('p', '先頭の ' + MAX_PREVIEW + ' 件を表示しました'));
+}
+
+function refresh() {
+  const built = buildUrl();
+  $('result').textContent = built.url || '';
+  say(built.error || '', true);
+  return built;
+}
+
+async function copyUrl() {
+  const built = refresh();
+  if (!built.url) return;
+  try {
+    await navigator.clipboard.writeText(built.url);
+    say('コピーしました', false);
+  } catch (e) {
+    const range = document.createRange();
+    range.selectNodeContents($('result'));
+    const selection = getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    say('コピーできませんでした。選択した URL を、手でコピーしてください', true);
+  }
+}
+
+async function runPreview() {
+  const built = refresh();
+  if (!built.url) return;
+  const button = $('preview');
+  button.disabled = true;
+  say('取得しています…', false);
+  try {
+    const response = await fetch(built.url, { cache: 'no-store' });
+    const body = await response.text();
+    const existing = [];
+    for (const name of ['X-Existing-Feed-URL', 'X-Existing-Feed-Title', 'X-Existing-Feed-Type']) {
+      const value = response.headers.get(name);
+      if (value !== null) existing.push([name, name.endsWith('Title') ? decoded(value) : value]);
+    }
+    renderPreview(response.status, response.headers.get('content-type') || '', existing, body);
+    say('', false);
+  } catch (e) {
+    say('通信に失敗しました: ' + e.message, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+for (const id of ['url', 'max-items', 'use-feed', 'feed-first']) {
+  $(id).addEventListener('input', refresh);
+}
+$('copy').addEventListener('click', copyUrl);
+$('preview').addEventListener('click', runPreview);
+refresh();
+</script>
+</body>
+</html>
